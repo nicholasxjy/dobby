@@ -298,7 +298,7 @@ final class ProcessMonitor {
         }
     }
 
-    private func show(_ text: String, isError: Bool) {
+    func show(_ text: String, isError: Bool) {
         let notice = Notice(text: text, isError: isError)
         self.notice = notice
         Task { [weak self] in
