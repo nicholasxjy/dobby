@@ -40,6 +40,8 @@ Turning on **System processes** asks for an administrator password, then starts 
 open build/Dobby.app
 ```
 
+The app icon is drawn in code: edit `scripts/make-icon.swift`, then run `swift scripts/make-icon.swift` to regenerate `Resources/AppIcon.icns`.
+
 `scripts/test.sh` works around a Command Line Tools bug where SwiftPM sometimes fails to find the swift-testing macro plugin.
 
 Launch at login and System processes need the bundled app: run Dobby from `build/Dobby.app` (ideally moved to `/Applications`), not via `swift run`.
