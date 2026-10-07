@@ -44,9 +44,9 @@ struct ProcessRow: View {
             TerminationMenuItems(actions: actions)
                 .disabled(state.isProtected)
             Divider()
-            CopyMenuItem(title: "拷贝 PID", text: String(row.pid))
+            CopyMenuItem(title: "Copy PID", text: String(row.pid))
             if let path = row.path {
-                CopyMenuItem(title: "拷贝路径", text: path)
+                CopyMenuItem(title: "Copy Path", text: path)
                 RevealMenuItem(path: row.appBundlePath ?? path)
             }
         }
@@ -73,19 +73,19 @@ struct ProcessColumnHeader: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("进程 \(count)\(includesSystem ? " · 含系统" : "")")
+            Text("Processes \(count)\(includesSystem ? " · incl. system" : "")")
             if isPaused {
-                Label("排序暂停", systemImage: "pause.fill")
+                Label("Sort paused", systemImage: "pause.fill")
                     .labelStyle(.titleAndIcon)
                     .foregroundStyle(Color.accentColor)
             }
             Spacer(minLength: 6)
             Text("PID").frame(width: Column.pid, alignment: .trailing)
             Color.clear.frame(width: Column.bar, height: 1)
-            Text(metric == .cpu ? "CPU ↓" : "内存 ↓").frame(width: Column.value, alignment: .trailing)
+            Text(metric == .cpu ? "CPU ↓" : "Memory ↓").frame(width: Column.value, alignment: .trailing)
         }
         .modifier(ColumnHeaderStyle())
-        .help(metric == .cpu ? "CPU 以单个核心为 100%" : "内存为进程的实际占用（与活动监视器一致）")
+        .help(metric == .cpu ? "CPU is relative to one core (100% = one full core)" : "Memory is the process's actual footprint (same as Activity Monitor)")
     }
 }
 
@@ -116,13 +116,13 @@ struct PortRow: View {
         }
         .foregroundStyle(state.isSelected ? Color.white : Color.primary)
         .modifier(RowChrome(state: state, actions: actions))
-        .help("关闭端口需要结束占用它的进程「\(binding.name)」")
+        .help("Closing this port means ending “\(binding.name)”, the process holding it")
         .contextMenu {
             TerminationMenuItems(actions: actions)
                 .disabled(state.isProtected)
             Divider()
-            CopyMenuItem(title: "拷贝端口号", text: String(binding.port))
-            CopyMenuItem(title: "拷贝 PID", text: String(binding.pid))
+            CopyMenuItem(title: "Copy Port", text: String(binding.port))
+            CopyMenuItem(title: "Copy PID", text: String(binding.pid))
             if let path = binding.path {
                 RevealMenuItem(path: binding.appBundlePath ?? path)
             }
@@ -139,15 +139,15 @@ struct PortColumnHeader: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("端口").frame(width: Column.port, alignment: .leading)
-            Text("协议").frame(width: Column.proto, alignment: .leading)
-            Text("进程 \(count)")
+            Text("Port").frame(width: Column.port, alignment: .leading)
+            Text("Proto").frame(width: Column.proto, alignment: .leading)
+            Text("Processes \(count)")
             Spacer(minLength: 6)
             Text("PID").frame(width: Column.pid, alignment: .trailing)
-            Text("可访问").frame(width: Column.exposure, alignment: .leading)
+            Text("Reach").frame(width: Column.exposure, alignment: .leading)
         }
         .modifier(ColumnHeaderStyle())
-        .help("关闭端口 = 结束占用它的进程")
+        .help("Closing a port = ending the process holding it")
     }
 }
 
@@ -171,8 +171,8 @@ private struct ExposureLabel: View {
 
     private var title: String {
         switch exposure {
-        case .loopback: "本机"
-        case .allInterfaces: "局域网"
+        case .loopback: "Local"
+        case .allInterfaces: "LAN"
         case .specific: addresses.first ?? ""
         }
     }
@@ -187,9 +187,9 @@ private struct ExposureLabel: View {
 
     private var help: String {
         switch exposure {
-        case .loopback: "只监听 127.0.0.1 / ::1，其他设备无法连接"
-        case .allInterfaces: "监听所有网卡，同一网络中的其他设备可能连接到它"
-        case .specific: "监听 \(addresses.joined(separator: ", "))"
+        case .loopback: "Listens on 127.0.0.1 / ::1 only; other devices can't connect"
+        case .allInterfaces: "Listens on all interfaces; other devices on the network may connect"
+        case .specific: "Listens on \(addresses.joined(separator: ", "))"
         }
     }
 }
@@ -216,16 +216,16 @@ struct SelectionActionBar: View {
                 .foregroundStyle(.secondary)
             Spacer(minLength: 6)
             if isProtected {
-                Label("系统关键进程，不能结束", systemImage: "lock")
+                Label("Critical system process, can't end", systemImage: "lock")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             } else {
-                Button("退出", action: onQuit)
+                Button("Quit", action: onQuit)
                     .buttonStyle(FlatButtonStyle())
-                    .help("正常退出：应用可以先保存数据（⌘⌫）")
-                Button(isConfirmingForceQuit ? "确认强制退出" : "强制退出", action: onForceQuit)
+                    .help("Quit normally; apps can save their data first (⌘⌫)")
+                Button(isConfirmingForceQuit ? "Confirm Force Quit" : "Force Quit", action: onForceQuit)
                     .buttonStyle(FlatButtonStyle(tint: Palette.critical, prominent: isConfirmingForceQuit))
-                    .help("立即结束进程，未保存的数据会丢失（⌥⌘⌫，需按两次）")
+                    .help("End the process immediately; unsaved data is lost (⌥⌘⌫, press twice)")
             }
         }
         .padding(.horizontal, 12)
@@ -328,8 +328,8 @@ private struct TerminationMenuItems: View {
     let actions: RowActions
 
     var body: some View {
-        Button("退出", action: actions.quit)
-        Button("强制退出", action: actions.forceQuit)
+        Button("Quit", action: actions.quit)
+        Button("Force Quit", action: actions.forceQuit)
     }
 }
 
@@ -349,7 +349,7 @@ private struct RevealMenuItem: View {
     let path: String
 
     var body: some View {
-        Button("在访达中显示") {
+        Button("Show in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
         }
     }

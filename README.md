@@ -2,20 +2,18 @@
 
 Dobby is a free macOS menu bar process monitor — a lighter, clearer take on Activity Monitor.
 
-> The app's interface is currently in Chinese. UI labels are given below in English, with the on-screen Chinese text in parentheses where it helps you find them.
-
 ## Features
 
 - **CPU, Memory and Ports tabs.** Each tab shows its system-wide total, with iStat Menus–style history graphs (CPU split into user/system, memory colored by pressure) above a dense list.
 - **Stable lists.** CPU and memory lists sort by usage, highest first. Rows stop reordering while the pointer is over the list, so you never click the wrong process.
-- **Port exposure at a glance.** The Ports tab lists listening TCP and bound UDP ports, sorted by port number, and marks each one as local-only (仅本机) or reachable from the network (局域网可访问).
-- **Quit or force quit.** Select a row, then choose **Quit** (退出) — apps get a normal Quit, other processes get SIGTERM — or **Force Quit** (强制退出) — SIGKILL, press twice to confirm. Closing a port means ending the process that holds it.
+- **Port exposure at a glance.** The Ports tab lists listening TCP and bound UDP ports, sorted by port number, and marks each one as **Local** (local-only) or **LAN** (reachable from the network).
+- **Quit or force quit.** Select a row, then choose **Quit** — apps get a normal Quit, other processes get SIGTERM — or **Force Quit** — SIGKILL, press twice to confirm. Closing a port means ending the process that holds it.
 - **Keyboard first.** Type to search, `↑` / `↓` to select, `⌘⌫` to quit, `⌥⌘⌫` to force quit, `⌘1` / `⌘2` / `⌘3` to switch tabs, `Esc` to clear, `⌘Q` to quit Dobby.
 - **Light on resources.** Processes are sampled every 2 seconds, and only while the panel is open. System totals for the graphs are sampled in the background with two cheap host calls.
 - **Settings menu** (gear icon in the footer):
-  - **Appearance** (外观): System, Light or Dark, remembered across launches.
-  - **Launch at login** (开机启动): starts Dobby automatically when you log in. macOS may ask you to allow it under *System Settings › General › Login Items*; Dobby opens that page for you. You can also turn it off there.
-- **System processes** (含系统进程): shows processes and ports owned by root and other users, and lets you end them. See below.
+  - **Appearance**: System, Light or Dark, remembered across launches.
+  - **Launch at Login**: starts Dobby automatically when you log in. macOS may ask you to allow it under *System Settings › General › Login Items*; Dobby opens that page for you. You can also turn it off there.
+- **System processes**: shows processes and ports owned by root and other users, and lets you end them. See below.
 
 ### System processes
 
