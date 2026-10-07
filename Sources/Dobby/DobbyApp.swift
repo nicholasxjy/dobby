@@ -7,7 +7,7 @@ struct DobbyApp: App {
 
     var body: some Scene {
         // The menu bar icon and panel are managed by StatusPanelController; SwiftUI just needs a scene.
-        MenuBarExtra("Dobby", systemImage: "gauge.with.dots.needle.50percent", isInserted: .constant(false)) {
+        MenuBarExtra("Dobby", systemImage: MenuBarReadout.appSymbol, isInserted: .constant(false)) {
             EmptyView()
         }
     }
@@ -24,6 +24,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if SnapshotRenderer.runIfRequested() { return }
-        panelController = StatusPanelController(monitor: ProcessMonitor(), theme: ThemeSettings.shared)
+        panelController = StatusPanelController(monitor: ProcessMonitor(), theme: ThemeSettings.shared, menuBarStats: MenuBarStatsSettings.shared)
     }
 }

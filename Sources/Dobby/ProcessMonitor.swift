@@ -67,6 +67,11 @@ final class ProcessMonitor {
     private(set) var systemAccess: SystemAccess = .off
     /// Processes Dobby refuses to end (launchd, WindowServer, ...).
     private(set) var protectedPIDs: Set<pid_t> = []
+    /// Latest totals for the menu bar readout, refreshed every system sample while `showsMenuBarStats` is on.
+    private(set) var menuBarSummary = MenuBarSummary(cpu: nil, memory: nil, portCount: nil)
+    var showsMenuBarStats = false {
+        didSet { if showsMenuBarStats && !oldValue { refreshMenuBarSummary() } }
+    }
 
     @ObservationIgnored private let sampler = ProcessSampler()
     @ObservationIgnored private let portScanner = PortScanner()
@@ -82,6 +87,8 @@ final class ProcessMonitor {
     @ObservationIgnored private var memorySamples = RingHistory<Double>(capacity: 90)
     @ObservationIgnored private var latestMemory: MemoryStats?
     @ObservationIgnored private var iconCache: [String: NSImage] = [:]
+    /// Same count as the Ports tab total; scanned in the background only for the menu bar readout.
+    @ObservationIgnored private var portCount: Int?
 
     /// The process the quit shortcuts and the action bar act on, from whichever tab is showing.
     var selectedTarget: (pid: pid_t, name: String, icon: NSImage)? {
@@ -117,6 +124,28 @@ final class ProcessMonitor {
         }
         // Hidden panels don't need view updates.
         if isVisible { publishSystem() }
+        if showsMenuBarStats { refreshMenuBarSummary() }
+    }
+
+    private func refreshMenuBarSummary() {
+        // While the panel is open, process sampling keeps the count current.
+        if !isVisible { portCount = scanPortCount() ?? portCount }
+        let summary = MenuBarSummary(cpu: cpuSamples.values.last?.total, memory: latestMemory, portCount: portCount)
+        // Unchanged numbers shouldn't redraw the status item.
+        if summary != menuBarSummary { menuBarSummary = summary }
+    }
+
+    /// A few milliseconds of libproc calls. With the root helper on, counts every user's ports like the Ports tab.
+    private func scanPortCount() -> Int? {
+        let sockets: [SocketEntry]
+        if let helper {
+            // A failing helper is reported and turned off by the next panel sample; keep the last count until then.
+            guard let snapshot = try? helper.snapshot() else { return nil }
+            sockets = snapshot.sockets
+        } else {
+            sockets = portScanner.scan()
+        }
+        return PortList.bindings(from: sockets, processes: [:]).count
     }
 
     private func publishSystem() {
@@ -192,6 +221,7 @@ final class ProcessMonitor {
 
         let processes = Dictionary(fresh.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
         allPorts = PortList.bindings(from: helperSockets ?? portScanner.scan(), processes: processes)
+        portCount = allPorts.count
         rebuildPorts()
         hasSampled = true
     }
