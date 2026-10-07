@@ -12,6 +12,7 @@ Dobby is a free macOS menu bar process monitor — a lighter, clearer take on Ac
 - **Light on resources.** Processes are sampled every 2 seconds, and only while the panel is open. System totals for the graphs are sampled in the background with two cheap host calls.
 - **Settings menu** (gear icon in the footer):
   - **Appearance**: System, Light or Dark, remembered across launches.
+  - **Show Stats in Menu Bar**: adds an iStat Menus–style readout next to the menu bar icon — CPU %, memory used % and the number of open ports, each as an icon plus a number. Hover it for the full values. While it is on, Dobby also counts ports in the background (a few milliseconds every 2 seconds).
   - **Launch at Login**: starts Dobby automatically when you log in. macOS may ask you to allow it under *System Settings › General › Login Items*; Dobby opens that page for you. You can also turn it off there.
 - **System processes**: shows processes and ports owned by root and other users, and lets you end them. See below.
 
@@ -56,7 +57,7 @@ Optional variables:
 
 | Variable | Values |
 | --- | --- |
-| `DOBBY_SNAPSHOT_TAB` | `memory`, `ports` (default: CPU) |
+| `DOBBY_SNAPSHOT_TAB` | `memory`, `ports`, `menubar` (the menu bar readout; default: CPU) |
 | `DOBBY_SNAPSHOT_THEME` | `system`, `light`, `dark` |
 | `DOBBY_SNAPSHOT_SELECT` | row index to select |
 | `DOBBY_SNAPSHOT_WAIT` | seconds to wait before capturing (default `2.6`) |

@@ -6,6 +6,7 @@ struct ContentView: View {
     @Bindable var theme: ThemeSettings
     @FocusState private var searchFocused: Bool
     private let launchAtLogin = LaunchAtLoginSettings.shared
+    @Bindable private var menuBarStats = MenuBarStatsSettings.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -323,6 +324,7 @@ struct ContentView: View {
             }
             .pickerStyle(.inline)
             Divider()
+            Toggle("Show Stats in Menu Bar", isOn: $menuBarStats.isEnabled)
             Toggle(launchAtLogin.state == .needsApproval ? "Launch at Login (Needs Approval)" : "Launch at Login", isOn: Binding(
                 get: { launchAtLogin.state != .off },
                 set: { enabled in
@@ -336,7 +338,7 @@ struct ContentView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .foregroundStyle(.secondary)
-        .help("Settings: appearance, launch at login")
+        .help("Settings: appearance, menu bar stats, launch at login")
     }
 }
 
