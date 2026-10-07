@@ -17,6 +17,8 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     }()
     /// Clicking the icon while open first resigns the panel's key status; don't reopen on that same click.
     private var lastHidden = Date.distantPast
+    /// Clicks in other apps, the desktop or the menu bar, while the panel is open.
+    private var outsideClickMonitor: Any?
 
     init(monitor: ProcessMonitor, theme: ThemeSettings, menuBarStats: MenuBarStatsSettings) {
         self.monitor = monitor
@@ -78,6 +80,11 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
         button.highlight(true)
+        // Resigning key alone misses clicks that don't change the key window (desktop, menu bar,
+        // or when macOS declined to activate Dobby). Clicks inside Dobby never reach a global monitor.
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hide() }
+        }
         // The shadow follows the content's alpha, so recompute it once the rounded content has drawn.
         Task { @MainActor [panel] in panel.invalidateShadow() }
     }
@@ -87,6 +94,8 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         panel.orderOut(nil)
         statusItem.button?.highlight(false)
         lastHidden = Date()
+        if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
+        outsideClickMonitor = nil
     }
 
     func windowDidResignKey(_ notification: Notification) {
