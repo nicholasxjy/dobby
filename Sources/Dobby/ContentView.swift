@@ -5,6 +5,7 @@ struct ContentView: View {
     @Bindable var monitor: ProcessMonitor
     @Bindable var theme: ThemeSettings
     @FocusState private var searchFocused: Bool
+    private let launchAtLogin = LaunchAtLoginSettings.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,7 +39,10 @@ struct ContentView: View {
         .overlay(PanelChrome.shape.strokeBorder(Palette.border))
         .background(WindowVisibilityReader { visible in
             monitor.setVisible(visible)
-            if visible { searchFocused = true }
+            if visible {
+                searchFocused = true
+                launchAtLogin.refresh()
+            }
         })
         .modifier(KeyboardControls(monitor: monitor))
         .background(ShortcutButtons(monitor: monitor))
@@ -293,7 +297,7 @@ struct ContentView: View {
                     .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 4)
-            themeMenu
+            settingsMenu
             Button {
                 NSApp.terminate(nil)
             } label: {
@@ -310,7 +314,7 @@ struct ContentView: View {
         .overlay(alignment: .top) { Hairline() }
     }
 
-    private var themeMenu: some View {
+    private var settingsMenu: some View {
         Menu {
             Picker("外观", selection: $theme.theme) {
                 ForEach(AppTheme.allCases, id: \.self) { option in
@@ -318,14 +322,21 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(.inline)
+            Divider()
+            Toggle(launchAtLogin.state == .needsApproval ? "开机启动（待系统设置中允许）" : "开机启动", isOn: Binding(
+                get: { launchAtLogin.state != .off },
+                set: { enabled in
+                    if let notice = launchAtLogin.setEnabled(enabled) { monitor.show(notice.text, isError: notice.isError) }
+                }
+            ))
         } label: {
-            Image(systemName: theme.theme.symbol)
+            Image(systemName: "gearshape")
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
         .foregroundStyle(.secondary)
-        .help("外观：\(theme.theme.title)")
+        .help("设置：外观、开机启动")
     }
 }
 
