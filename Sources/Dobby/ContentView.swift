@@ -53,8 +53,8 @@ struct ContentView: View {
     private var tabItems: [TabStrip.Item] {
         [
             .init(tab: .cpu, title: "CPU", value: monitor.systemCPU.map(percent) ?? "—", shortcut: "1"),
-            .init(tab: .memory, title: "内存", value: monitor.memory.map { UsageFormat.bytes($0.usedBytes) } ?? "—", shortcut: "2"),
-            .init(tab: .ports, title: "端口", value: monitor.hasSampled ? String(monitor.allPorts.count) : "—", shortcut: "3"),
+            .init(tab: .memory, title: "Memory", value: monitor.memory.map { UsageFormat.bytes($0.usedBytes) } ?? "—", shortcut: "2"),
+            .init(tab: .ports, title: "Ports", value: monitor.hasSampled ? String(monitor.allPorts.count) : "—", shortcut: "3"),
         ]
     }
 
@@ -74,38 +74,38 @@ struct ContentView: View {
                     capacity: 90
                 )
                 VStack(spacing: 2) {
-                    StatLine(color: Palette.user, label: "用户", value: monitor.cpuLoad.map { percent($0.user) } ?? "—")
-                    StatLine(color: Palette.system, label: "系统", value: monitor.cpuLoad.map { percent($0.system) } ?? "—")
-                    StatLine(color: nil, label: "空闲", value: monitor.cpuLoad.map { percent(1 - $0.total) } ?? "—")
-                    StatLine(color: nil, label: "核心", value: String(SystemStats.coreCount))
+                    StatLine(color: Palette.user, label: "User", value: monitor.cpuLoad.map { percent($0.user) } ?? "—")
+                    StatLine(color: Palette.system, label: "System", value: monitor.cpuLoad.map { percent($0.system) } ?? "—")
+                    StatLine(color: nil, label: "Idle", value: monitor.cpuLoad.map { percent(1 - $0.total) } ?? "—")
+                    StatLine(color: nil, label: "Cores", value: String(SystemStats.coreCount))
                 }
-                .frame(width: 128)
+                .frame(width: 146)
             }
         case .memory:
             HStack(spacing: 14) {
                 HistoryGraph(series: [.init(values: monitor.memoryHistory, color: pressureColor)], capacity: 90)
                 VStack(spacing: 2) {
-                    StatLine(color: pressureColor, label: "已用", value: monitor.memory.map { UsageFormat.bytes($0.usedBytes) } ?? "—")
+                    StatLine(color: pressureColor, label: "Used", value: monitor.memory.map { UsageFormat.bytes($0.usedBytes) } ?? "—")
                     StatLine(color: nil, label: "App", value: monitor.memory.map { UsageFormat.bytes($0.appBytes) } ?? "—")
-                    StatLine(color: nil, label: "联动", value: monitor.memory.map { UsageFormat.bytes($0.wiredBytes) } ?? "—")
-                    StatLine(color: nil, label: "已压缩", value: monitor.memory.map { UsageFormat.bytes($0.compressedBytes) } ?? "—")
-                    StatLine(color: nil, label: "压力", value: pressureLabel, valueColor: pressureColor)
+                    StatLine(color: nil, label: "Wired", value: monitor.memory.map { UsageFormat.bytes($0.wiredBytes) } ?? "—")
+                    StatLine(color: nil, label: "Compressed", value: monitor.memory.map { UsageFormat.bytes($0.compressedBytes) } ?? "—")
+                    StatLine(color: nil, label: "Pressure", value: pressureLabel, valueColor: pressureColor)
                 }
-                .frame(width: 128)
+                .frame(width: 146)
             }
         case .ports:
             let ports = monitor.allPorts
             Grid(horizontalSpacing: 24, verticalSpacing: 6) {
                 GridRow {
-                    StatLine(color: nil, label: "TCP 监听", value: String(ports.filter { $0.proto == .tcp }.count))
+                    StatLine(color: nil, label: "TCP listening", value: String(ports.filter { $0.proto == .tcp }.count))
                     StatLine(color: nil, label: "UDP", value: String(ports.filter { $0.proto == .udp }.count))
                 }
                 GridRow {
-                    StatLine(color: Palette.memory, label: "仅本机", value: String(ports.filter { $0.exposure == .loopback }.count))
-                    StatLine(color: Palette.warning, label: "局域网可访问", value: String(ports.filter { $0.exposure != .loopback }.count))
+                    StatLine(color: Palette.memory, label: "Local only", value: String(ports.filter { $0.exposure == .loopback }.count))
+                    StatLine(color: Palette.warning, label: "Network-reachable", value: String(ports.filter { $0.exposure != .loopback }.count))
                 }
                 GridRow {
-                    Text("关闭端口即结束占用它的进程")
+                    Text("Closing a port ends the process holding it")
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                         .gridCellColumns(2)
@@ -126,9 +126,9 @@ struct ContentView: View {
 
     private var pressureLabel: String {
         switch monitor.memory?.pressure {
-        case .warning: "偏高"
-        case .critical: "严重"
-        case .normal: "正常"
+        case .warning: "High"
+        case .critical: "Critical"
+        case .normal: "Normal"
         case nil: "—"
         }
     }
@@ -141,7 +141,7 @@ struct ContentView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                TextField(monitor.tab == .ports ? "搜索端口号、进程名或 PID" : "搜索进程名、所属应用、用户或 PID", text: $monitor.query)
+                TextField(monitor.tab == .ports ? "Search port, process or PID" : "Search process, app, user or PID", text: $monitor.query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .focused($searchFocused)
@@ -154,7 +154,7 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.tertiary)
-                    .help("清除搜索")
+                    .help("Clear search")
                 }
             }
             .padding(.horizontal, 7)
@@ -172,7 +172,7 @@ struct ContentView: View {
                 get: { monitor.systemAccess == .on },
                 set: { _ in monitor.toggleSystemAccess() }
             )) {
-                Text("含系统进程").font(.system(size: 11.5))
+                Text("System processes").font(.system(size: 11.5))
             }
             .toggleStyle(.checkbox)
             .disabled(monitor.systemAccess == .requesting)
@@ -181,8 +181,8 @@ struct ContentView: View {
             }
         }
         .help(monitor.systemAccess == .on
-            ? "正在显示所有用户的进程（root 等）。取消勾选会结束管理员助手"
-            : "显示 root 等其他用户的进程和端口，并允许结束它们（需要管理员密码，Dobby 退出后失效）")
+            ? "Showing processes of all users (root and others). Unchecking stops the admin helper"
+            : "Show and end processes and ports of root and other users (asks for an admin password; lasts until Dobby quits)")
     }
 
     // MARK: List
@@ -279,7 +279,7 @@ struct ContentView: View {
         } else if !monitor.query.isEmpty {
             ContentUnavailableView.search(text: monitor.query)
         } else if monitor.tab == .ports {
-            ContentUnavailableView("没有被占用的端口", systemImage: "network.slash", description: Text(monitor.systemAccess == .on ? "没有进程在监听端口" : "当前用户的进程都没有在监听端口"))
+            ContentUnavailableView("No ports in use", systemImage: "network.slash", description: Text(monitor.systemAccess == .on ? "No process is listening on a port" : "None of your processes is listening on a port"))
         }
     }
 
@@ -293,7 +293,7 @@ struct ContentView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             } else {
-                Text("↑↓ 选择 · ⌘⌫ 退出 · ⌥⌘⌫ 强制退出 · ⌘1/2/3 切换")
+                Text("↑↓ select · ⌘⌫ quit · ⌥⌘⌫ force quit · ⌘1/2/3 tabs")
                     .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 4)
@@ -306,7 +306,7 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .keyboardShortcut("q")
-            .help("退出 Dobby（⌘Q）")
+            .help("Quit Dobby (⌘Q)")
         }
         .font(.system(size: 10.5))
         .padding(.horizontal, 14)
@@ -316,14 +316,14 @@ struct ContentView: View {
 
     private var settingsMenu: some View {
         Menu {
-            Picker("外观", selection: $theme.theme) {
+            Picker("Appearance", selection: $theme.theme) {
                 ForEach(AppTheme.allCases, id: \.self) { option in
                     Label(option.title, systemImage: option.symbol).tag(option)
                 }
             }
             .pickerStyle(.inline)
             Divider()
-            Toggle(launchAtLogin.state == .needsApproval ? "开机启动（待系统设置中允许）" : "开机启动", isOn: Binding(
+            Toggle(launchAtLogin.state == .needsApproval ? "Launch at Login (Needs Approval)" : "Launch at Login", isOn: Binding(
                 get: { launchAtLogin.state != .off },
                 set: { enabled in
                     if let notice = launchAtLogin.setEnabled(enabled) { monitor.show(notice.text, isError: notice.isError) }
@@ -336,7 +336,7 @@ struct ContentView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .foregroundStyle(.secondary)
-        .help("设置：外观、开机启动")
+        .help("Settings: appearance, launch at login")
     }
 }
 
@@ -366,19 +366,19 @@ private struct ShortcutButtons: View {
     var body: some View {
         let target = monitor.selectedTarget
         ZStack {
-            Button("退出所选进程") {
+            Button("Quit Selected Process") {
                 if let target { monitor.quit(pid: target.pid, name: target.name) }
             }
             .keyboardShortcut(.delete, modifiers: .command)
             .disabled(target == nil)
 
-            Button("强制退出所选进程") {
+            Button("Force Quit Selected Process") {
                 if let target { monitor.forceQuit(pid: target.pid, name: target.name) }
             }
             .keyboardShortcut(.delete, modifiers: [.command, .option])
             .disabled(target == nil)
 
-            Button("取消") {
+            Button("Cancel") {
                 monitor.clearSelectionOrQuery()
             }
             .keyboardShortcut(.cancelAction)

@@ -115,7 +115,7 @@ struct TabStrip: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(item.shortcut, modifiers: .command)
-                .help("切换到\(item.title)（⌘\(String(item.shortcut.character))）")
+                .help("Switch to \(item.title) (⌘\(String(item.shortcut.character)))")
             }
         }
         .overlay(alignment: .bottom) { Hairline() }

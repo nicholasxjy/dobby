@@ -164,7 +164,7 @@ final class ProcessMonitor {
                 helperSockets = snapshot.sockets
             } catch {
                 disableSystemAccess(resample: false)
-                show("系统进程助手已断开，只显示当前用户的进程", isError: true)
+                show("System process helper disconnected; showing only your processes", isError: true)
                 snapshots = sampler.snapshot()
             }
         } else {
@@ -273,12 +273,12 @@ final class ProcessMonitor {
     private func perform(_ mode: TerminationMode, pid: pid_t, name: String) {
         confirmingForceQuit = nil
         guard !protectedPIDs.contains(pid), pid > 1 else {
-            show("「\(name)」是系统关键进程，结束它会导致死机或注销", isError: true)
+            show("“\(name)” is a critical system process; ending it would freeze or log out the Mac", isError: true)
             return
         }
         do {
             try terminator.terminate(pid, mode: mode)
-            show(mode == .quit ? "已请求退出「\(name)」" : "已强制退出「\(name)」", isError: false)
+            show(mode == .quit ? "Asked “\(name)” to quit" : "Force quit “\(name)”", isError: false)
         } catch {
             show(message(for: error, name: name), isError: true)
         }
@@ -290,11 +290,11 @@ final class ProcessMonitor {
 
     private func message(for error: TerminationError, name: String) -> String {
         switch error {
-        case .protectedProcess: return "「\(name)」受保护，不能在这里结束"
+        case .protectedProcess: return "“\(name)” is protected and can't be ended here"
         case .notPermitted:
-            return systemAccess == .on ? "没有权限结束「\(name)」" : "没有权限结束「\(name)」，打开「含系统进程」后可重试"
-        case .noSuchProcess: return "「\(name)」已经退出"
-        case .failed(let code): return "结束「\(name)」失败（\(String(cString: strerror(code)))）"
+            return systemAccess == .on ? "No permission to end “\(name)”" : "No permission to end “\(name)”; turn on System processes and try again"
+        case .noSuchProcess: return "“\(name)” has already exited"
+        case .failed(let code): return "Couldn't end “\(name)” (\(String(cString: strerror(code))))"
         }
     }
 
@@ -340,7 +340,7 @@ final class ProcessMonitor {
         let helperURL = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("DobbyHelper")
         guard let helperURL, FileManager.default.isExecutableFile(atPath: helperURL.path) else {
             systemAccess = .off
-            show("找不到 DobbyHelper，请用 scripts/build-app.sh 重新打包", isError: true)
+            show("DobbyHelper not found; rebuild the app with scripts/build-app.sh", isError: true)
             return
         }
         do {
@@ -350,17 +350,17 @@ final class ProcessMonitor {
             guard result.status == 0 else {
                 systemAccess = .off
                 // -128: the user cancelled the password prompt.
-                if !result.error.contains("-128") { show("无法获取管理员权限", isError: true) }
+                if !result.error.contains("-128") { show("Couldn't get administrator privileges", isError: true) }
                 return
             }
             try await Task.detached { try client.acceptHelper(timeout: 10) }.value
             helper = client
             systemAccess = .on
-            show("已显示所有用户的进程", isError: false)
+            show("Showing processes of all users", isError: false)
             sample(publish: true)
         } catch {
             systemAccess = .off
-            show("系统进程助手启动失败", isError: true)
+            show("System process helper failed to start", isError: true)
         }
     }
 

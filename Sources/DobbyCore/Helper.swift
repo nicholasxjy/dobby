@@ -179,7 +179,7 @@ public enum HelperLaunchScript {
         helperPath: String,
         socketPath: String,
         clientPID: pid_t,
-        prompt: String = "Dobby 需要管理员权限，以显示和结束系统进程。"
+        prompt: String = "Dobby needs administrator privileges to show and end system processes."
     ) -> String {
         "do shell script (quoted form of \(literal(helperPath))) & \" --connect \" & (quoted form of \(literal(socketPath)))"
             + " & \" --client-pid \(clientPID) >/dev/null 2>&1 &\""
