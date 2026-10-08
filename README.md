@@ -2,6 +2,10 @@
 
 Dobby is a free macOS menu bar process monitor — a lighter, clearer take on Activity Monitor.
 
+## Demo
+
+![Dobby CPU tab showing usage history and system processes](docs/images/demo.png)
+
 ## Features
 
 - **CPU, Memory and Ports tabs.** Each tab shows its system-wide total, with iStat Menus–style history graphs (CPU split into user/system, memory colored by pressure) above a dense list.
