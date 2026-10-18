@@ -50,6 +50,14 @@ public struct PortBinding: Identifiable, Equatable, Sendable {
     public var appBundlePath: String? {
         path.flatMap(AppBundle.outermostAppPath(in:))
     }
+
+    public func displayLabel(currentUser: String) -> ProcessDisplayLabel {
+        ProcessDisplayLabel(
+            name: name,
+            owningAppName: path.flatMap(AppBundle.owningAppName(ofExecutable:)),
+            otherOwner: ownerName == currentUser ? nil : ownerName
+        )
+    }
 }
 
 public enum PortList {
@@ -155,5 +163,52 @@ public struct PortScanner {
         }
         let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
         return String(decoding: bytes, as: UTF8.self)
+    }
+}
+
+/// The Ports tab's reach filter.
+public enum PortReach: Sendable, CaseIterable {
+    case all, network, local
+}
+
+extension PortBinding {
+    /// Other devices may connect: listening on every interface or on a specific non-loopback address.
+    public var isNetworkReachable: Bool { exposure != .loopback }
+}
+
+extension PortList {
+    public static func filtered(_ bindings: [PortBinding], reach: PortReach) -> [PortBinding] {
+        switch reach {
+        case .all: bindings
+        case .network: bindings.filter(\.isNetworkReachable)
+        case .local: bindings.filter { !$0.isNetworkReachable }
+        }
+    }
+}
+
+/// Network-reachable ports that opened since the user last looked. The first scan is the baseline.
+/// Ports are keyed by protocol and number, so a server restarting under a new PID isn't new.
+public struct NewNetworkPorts: Sendable {
+    public private(set) var unseen: [PortBinding] = []
+    private var known: Set<String>?
+
+    public init() {}
+
+    public mutating func update(with bindings: [PortBinding]) {
+        let network = bindings.filter(\.isNetworkReachable)
+        let keys = Set(network.map(Self.key))
+        if let known {
+            let unseenKeys = Set(unseen.map(Self.key))
+            unseen = network.filter { unseenKeys.contains(Self.key($0)) || !known.contains(Self.key($0)) }
+        }
+        known = keys
+    }
+
+    public mutating func acknowledge() {
+        unseen = []
+    }
+
+    private static func key(_ binding: PortBinding) -> String {
+        "\(binding.proto.rawValue)/\(binding.port)"
     }
 }

@@ -10,4 +10,14 @@ public enum AppBundle {
         let last = appPath.split(separator: "/").last.map(String.init) ?? appPath
         return last.hasSuffix(".app") ? String(last.dropLast(4)) : last
     }
+
+    /// Name of the app an executable helps, or nil when it is the app's main executable or not part of an app.
+    public static func owningAppName(ofExecutable path: String) -> String? {
+        guard let appPath = outermostAppPath(in: path) else { return nil }
+        let mainExecutableDir = appPath + "/Contents/MacOS/"
+        if path.hasPrefix(mainExecutableDir), !path.dropFirst(mainExecutableDir.count).contains("/") {
+            return nil
+        }
+        return displayName(ofAppPath: appPath)
+    }
 }

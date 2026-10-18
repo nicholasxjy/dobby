@@ -4,15 +4,27 @@ import SwiftUI
 
 /// Flat, opaque colors (iStat Menus–like) instead of translucent materials.
 enum Palette {
-    static let background = dynamic(light: 0xF4F4F5, dark: 0x1C1C1E)
-    static let surface = dynamic(light: 0xFFFFFF, dark: 0x262628)
-    static let hairline = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.09)
-    static let border = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.16)
+    static let background = dynamic(light: 0xF4F4F6, dark: 0x1E1E20)
+    static let surface = dynamic(light: 0xFFFFFF, dark: 0x2A2A2D)
+    /// The details card floats above the list.
+    static let raised = dynamic(light: 0xFFFFFF, dark: 0x303034)
+    static let hairline = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.08)
+    static let border = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.14)
+    static let fill = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.06)
+    static let hover = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.05)
+    static let track = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.09)
+    static let neutralBar = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.30)
     static let user = dynamic(light: 0x2F7CF6, dark: 0x4F93FF)
     static let system = dynamic(light: 0xE5484D, dark: 0xFF6369)
     static let memory = dynamic(light: 0x2A9D68, dark: 0x3DD68C)
-    static let warning = dynamic(light: 0xDB7A06, dark: 0xFFB224)
-    static let critical = system
+    /// Orange for text; darker in light mode so small text stays readable.
+    static let warning = dynamic(light: 0xA85800, dark: 0xFFB224)
+    /// Orange for bars, dots and fills.
+    static let warningFill = dynamic(light: 0xE08A1E, dark: 0xFFB224)
+    static let warningSoft = dynamic(light: 0xDB7A06, dark: 0xFFB224, alpha: 0.13)
+    static let critical = dynamic(light: 0xC8292F, dark: 0xFF6369)
+    static let criticalSoft = dynamic(light: 0xE5484D, dark: 0xFF6369, alpha: 0.13)
+    static let accentSoft = Color.accentColor.opacity(0.13)
 
     private static func dynamic(light: UInt32, dark: UInt32, alpha: CGFloat = 1) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
@@ -40,8 +52,8 @@ enum Heat {
 
     var barColor: Color {
         switch self {
-        case .normal: Color.secondary.opacity(0.5)
-        case .elevated: Palette.warning
+        case .normal: Palette.neutralBar
+        case .elevated: Palette.warningFill
         case .high: Palette.critical
         }
     }
@@ -61,64 +73,216 @@ struct Hairline: View {
     }
 }
 
+/// A fixed-width usage bar; no GeometryReader, so it stays cheap in long lists.
 struct MiniBar: View {
     let fraction: Double
     let color: Color
+    var track: Color = Palette.track
+    var width: CGFloat = 32
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Rectangle().fill(Palette.hairline)
-                Rectangle()
-                    .fill(color)
-                    .frame(width: max(geometry.size.width * min(max(fraction, 0), 1), fraction > 0 ? 1 : 0))
+        let clamped = min(max(fraction, 0), 1)
+        Capsule()
+            .fill(track)
+            .frame(width: width, height: 4)
+            .overlay(alignment: .leading) {
+                Capsule().fill(color).frame(width: clamped > 0 ? max(width * clamped, 3) : 0, height: 4)
             }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 1))
     }
 }
 
-/// Flat text tabs with an underline; each tab also carries its live total.
-struct TabStrip: View {
-    struct Item {
-        let tab: ProcessMonitor.Tab
-        let title: String
-        let value: String
-        let shortcut: KeyEquivalent
+/// Segments of a whole (user + system CPU, LAN + local ports) as one thin bar.
+struct SegmentedMeter: View {
+    struct Segment {
+        let fraction: Double
+        let color: Color
     }
 
-    let items: [Item]
-    @Binding var selection: ProcessMonitor.Tab
+    let segments: [Segment]
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(items, id: \.tab) { item in
-                let isSelected = item.tab == selection
+        Canvas { context, size in
+            context.clip(to: Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: size.height / 2))
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Palette.track))
+            var x: CGFloat = 0
+            for segment in segments {
+                let width = size.width * CGFloat(min(max(segment.fraction, 0), 1))
+                context.fill(Path(CGRect(x: x, y: 0, width: width, height: size.height)), with: .color(segment.color))
+                x += width
+            }
+        }
+        .frame(height: 4)
+    }
+}
+
+/// One of the three headline tiles that double as the view switcher.
+struct VitalTile: View {
+    let title: String
+    let symbol: String
+    let value: String
+    let detail: String
+    var detailColor: Color = .secondary
+    let segments: [SegmentedMeter.Segment]
+    let shortcut: KeyEquivalent
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    Image(systemName: symbol).font(.system(size: 10.5, weight: .semibold))
+                    Text(title)
+                    Spacer(minLength: 2)
+                    Text("⌘\(String(shortcut.character))")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                Text(value)
+                    .font(.system(size: 19, weight: .semibold).monospacedDigit())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                SegmentedMeter(segments: segments)
+                Text(detail)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(detailColor)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Palette.surface)
+                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Palette.border))
+                        .elevated(cornerRadius: 9)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(shortcut, modifiers: .command)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .help("\(title) (⌘\(String(shortcut.character)))")
+    }
+}
+
+/// A small rounded label: "Admin helper on", "Paused", "LAN".
+struct Badge: View {
+    let text: String
+    var symbol: String?
+    var foreground: Color = .secondary
+    var background: Color = Palette.fill
+
+    var body: some View {
+        HStack(spacing: 3) {
+            if let symbol { Image(systemName: symbol).font(.system(size: 8, weight: .bold)) }
+            Text(text)
+        }
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(foreground)
+        .padding(.horizontal, 6)
+        .frame(height: 16)
+        .background(Capsule().fill(background))
+        .fixedSize()
+    }
+}
+
+/// A shortcut key drawn as a keycap in the footer hints.
+struct KeyCap: View {
+    let key: String
+
+    var body: some View {
+        Text(key)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 4)
+            .frame(height: 16)
+            .background(RoundedRectangle(cornerRadius: 4).fill(Palette.fill))
+    }
+}
+
+/// A segmented control drawn flat: the chosen segment is a raised white pill.
+struct PillSegments<Value: Hashable>: View {
+    struct Option {
+        let value: Value
+        let title: String
+        var symbol: String?
+        var isBusy = false
+    }
+
+    let options: [Option]
+    let selection: Value
+    var height: CGFloat = 28
+    var fillsWidth = false
+    let select: (Value) -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.value) { option in
+                let isSelected = option.value == selection
                 Button {
-                    selection = item.tab
+                    select(option.value)
                 } label: {
-                    VStack(spacing: 0) {
-                        HStack(spacing: 6) {
-                            Text(item.title)
-                                .font(.system(size: 11.5, weight: .semibold))
-                            Text(item.value)
-                                .font(.system(size: 11.5, weight: .regular).monospacedDigit())
+                    HStack(spacing: 4) {
+                        if option.isBusy {
+                            ProgressView().controlSize(.mini)
+                        } else if let symbol = option.symbol {
+                            Image(systemName: symbol).font(.system(size: 9.5, weight: .semibold))
                         }
-                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 33)
-                        Rectangle()
-                            .fill(isSelected ? Color.accentColor : .clear)
-                            .frame(height: 2)
+                        Text(option.title)
+                    }
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                    .padding(.horizontal, 9)
+                    .frame(maxWidth: fillsWidth ? .infinity : nil, maxHeight: .infinity)
+                    .background {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Palette.surface)
+                                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Palette.hairline))
+                        }
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .keyboardShortcut(item.shortcut, modifiers: .command)
-                .help("Switch to \(item.title) (⌘\(String(item.shortcut.character)))")
+                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             }
         }
-        .overlay(alignment: .bottom) { Hairline() }
+        .padding(2)
+        .frame(height: height)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Palette.fill))
+    }
+}
+
+extension View {
+    /// A soft drop shadow made of offset, unblurred layers. Blurred `.shadow` needs offscreen buffers
+    /// (about 18 MB for the panel), which a menu bar utility shouldn't spend on looks.
+    func elevated(cornerRadius: CGFloat, depth: CGFloat = 1) -> some View {
+        background {
+            ZStack {
+                RoundedRectangle(cornerRadius: cornerRadius + 1, style: .continuous)
+                    .fill(Color.black.opacity(0.035))
+                    .padding(-1)
+                    .offset(y: 2 * depth)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color.black.opacity(0.05))
+                    .offset(y: depth)
+            }
+        }
+    }
+}
+
+/// Plain icon or text button that dims while pressed. (No hover tint: `@State` is a macro that the
+/// Command Line Tools can't expand, and this project builds without Xcode.)
+struct IconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.55 : 1)
+            .contentShape(Rectangle())
     }
 }
 
@@ -169,32 +333,8 @@ struct HistoryGraph: View {
             }
         }
         .background(Palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 3))
-        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.hairline))
-    }
-}
-
-/// One "● label ........ value" line of a summary column.
-struct StatLine: View {
-    let color: Color?
-    let label: String
-    let value: String
-    var valueColor: Color = .primary
-
-    var body: some View {
-        HStack(spacing: 5) {
-            if let color {
-                RoundedRectangle(cornerRadius: 1.5).fill(color).frame(width: 7, height: 7)
-            }
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 4)
-            Text(value)
-                .font(.system(size: 11).monospacedDigit())
-                .foregroundStyle(valueColor)
-        }
-        .font(.system(size: 11))
-        .lineLimit(1)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Palette.hairline))
     }
 }
 
@@ -205,16 +345,16 @@ struct FlatButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 11.5, weight: .medium))
+            .font(.system(size: 12, weight: prominent ? .semibold : .medium))
             .foregroundStyle(prominent ? Color.white : tint)
-            .padding(.horizontal, 10)
-            .frame(height: 22)
+            .padding(.horizontal, 12)
+            .frame(height: 26)
             .background(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: 6)
                     .fill(prominent ? tint : Palette.surface)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(prominent ? Color.clear : Palette.border)
             )
             .opacity(configuration.isPressed ? 0.75 : 1)
@@ -224,7 +364,7 @@ struct FlatButtonStyle: ButtonStyle {
 
 /// The panel's outline; the window is transparent, so this clip defines its corners and shadow.
 enum PanelChrome {
-    static let cornerRadius: CGFloat = 18
+    static let cornerRadius: CGFloat = 14
     static let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 }
 

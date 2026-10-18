@@ -26,9 +26,31 @@ final class ProcessMonitor {
             guard tab != oldValue else { return }
             selection = nil
             portSelection = nil
+            hoveredRowID = nil
             rebuildRows(keepOrder: false)
+            if tab == .ports { acknowledgeNewNetworkPorts() }
         }
     }
+    /// The Ports tab's All / LAN / Local filter.
+    var portReach: PortReach = .all {
+        didSet { if portReach != oldValue { rebuildPorts() } }
+    }
+    /// The settings view replaces the list while open.
+    var isShowingSettings = false {
+        didSet {
+            guard isShowingSettings != oldValue else { return }
+            if isShowingSettings {
+                hoveredRowID = nil
+                isExplainingSystemAccess = false
+                isPointerInList = false
+            } else if refreshTask != nil {
+                // Process sampling pauses behind the settings view; catch up right away.
+                sample(publish: true)
+            }
+        }
+    }
+    /// "All users" was chosen; the explanation shows before the password prompt.
+    var isExplainingSystemAccess = false
     var metric: Metric { tab == .memory ? .memory : .cpu }
     var query = "" {
         didSet {
@@ -55,6 +77,8 @@ final class ProcessMonitor {
     private(set) var processCount = 0
     private(set) var portRows: [PortBinding] = []
     private(set) var allPorts: [PortBinding] = []
+    /// Ports matching the search, split by reach, for the filter chips.
+    private(set) var portCounts = PortCounts()
     private(set) var hasSampled = false
     /// Latest whole-system CPU split, plus history for the graphs (oldest first).
     private(set) var cpuLoad: CPULoad?
@@ -71,6 +95,16 @@ final class ProcessMonitor {
     private(set) var menuBarSummary = MenuBarSummary(cpu: nil, memory: nil, portCount: nil)
     var showsMenuBarStats = false {
         didSet { if showsMenuBarStats && !oldValue { refreshMenuBarSummary() } }
+    }
+    /// The readout shows the port count, so scan ports while the panel is closed too.
+    var countsPortsInBackground = false
+    /// Report ports that start listening on the network in the menu bar readout.
+    var flagsNewNetworkPorts = false {
+        didSet {
+            guard flagsNewNetworkPorts != oldValue else { return }
+            newNetworkPorts = NewNetworkPorts()
+            if showsMenuBarStats { refreshMenuBarSummary() }
+        }
     }
 
     @ObservationIgnored private let sampler = ProcessSampler()
@@ -89,6 +123,24 @@ final class ProcessMonitor {
     @ObservationIgnored private var iconCache: [String: NSImage] = [:]
     /// Same count as the Ports tab total; scanned in the background only for the menu bar readout.
     @ObservationIgnored private var portCount: Int?
+    @ObservationIgnored private var newNetworkPorts = NewNetworkPorts()
+    @ObservationIgnored private let preferences = PreferencesSettings.shared
+
+    struct PortCounts: Equatable {
+        var tcp = 0
+        var udp = 0
+        var network = 0
+        var local = 0
+        var all: Int { network + local }
+    }
+
+    private var interval: Duration { .seconds(preferences.refreshInterval.seconds) }
+
+    /// How much time the history graphs cover.
+    var historySpan: String {
+        let seconds = 90 * preferences.refreshInterval.seconds
+        return seconds % 60 == 0 ? "\(seconds / 60) min" : String(format: "%.1f min", Double(seconds) / 60)
+    }
 
     /// The process the quit shortcuts and the action bar act on, from whichever tab is showing.
     var selectedTarget: (pid: pid_t, name: String, icon: NSImage)? {
@@ -107,7 +159,7 @@ final class ProcessMonitor {
             while !Task.isCancelled {
                 guard let self else { return }
                 self.sampleSystem()
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: self.interval)
             }
         }
     }
@@ -129,14 +181,35 @@ final class ProcessMonitor {
 
     private func refreshMenuBarSummary() {
         // While the panel is open, process sampling keeps the count current.
-        if !isVisible { portCount = scanPortCount() ?? portCount }
-        let summary = MenuBarSummary(cpu: cpuSamples.values.last?.total, memory: latestMemory, portCount: portCount)
+        if !isVisible, countsPortsInBackground, let bindings = scanPorts() {
+            portCount = bindings.count
+            if flagsNewNetworkPorts { newNetworkPorts.update(with: bindings) }
+        }
+        let summary = MenuBarSummary(
+            cpu: cpuSamples.values.last?.total,
+            memory: latestMemory,
+            portCount: portCount,
+            newNetworkPorts: flagsNewNetworkPorts ? newNetworkPorts.unseen.map(Self.portLabel) : []
+        )
         // Unchanged numbers shouldn't redraw the status item.
         if summary != menuBarSummary { menuBarSummary = summary }
     }
 
-    /// A few milliseconds of libproc calls. With the root helper on, counts every user's ports like the Ports tab.
-    private func scanPortCount() -> Int? {
+    /// "python3 :8080"; background scans don't carry process names, so look the name up.
+    private static func portLabel(_ binding: PortBinding) -> String {
+        let name = binding.name.hasPrefix("PID ") ? ProcessSampler.name(of: binding.pid) : binding.name
+        return "\(name) :\(binding.port)"
+    }
+
+    /// Seen while the Ports tab is open, so the menu bar stops flagging them.
+    private func acknowledgeNewNetworkPorts() {
+        guard !newNetworkPorts.unseen.isEmpty else { return }
+        newNetworkPorts.acknowledge()
+        if showsMenuBarStats { refreshMenuBarSummary() }
+    }
+
+    /// A few milliseconds of libproc calls. With the root helper on, covers every user's ports like the Ports tab.
+    private func scanPorts() -> [PortBinding]? {
         let sockets: [SocketEntry]
         if let helper {
             // A failing helper is reported and turned off by the next panel sample; keep the last count until then.
@@ -145,7 +218,7 @@ final class ProcessMonitor {
         } else {
             sockets = portScanner.scan()
         }
-        return PortList.bindings(from: sockets, processes: [:]).count
+        return PortList.bindings(from: sockets, processes: [:])
     }
 
     private func publishSystem() {
@@ -168,8 +241,8 @@ final class ProcessMonitor {
             self?.sample(publish: self?.usages.isEmpty ?? true)
             try? await Task.sleep(for: .milliseconds(400))
             while !Task.isCancelled {
-                self?.sample(publish: true)
-                try? await Task.sleep(for: .seconds(2))
+                if self?.isShowingSettings == false { self?.sample(publish: true) }
+                try? await Task.sleep(for: self?.interval ?? .seconds(2))
             }
         }
     }
@@ -180,6 +253,7 @@ final class ProcessMonitor {
         isVisible = false
         lastSampleTime = 0
         isPointerInList = false
+        hoveredRowID = nil
     }
 
     private func sample(publish: Bool) {
@@ -222,6 +296,10 @@ final class ProcessMonitor {
         let processes = Dictionary(fresh.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
         allPorts = PortList.bindings(from: helperSockets ?? portScanner.scan(), processes: processes)
         portCount = allPorts.count
+        if flagsNewNetworkPorts {
+            newNetworkPorts.update(with: allPorts)
+            if tab == .ports { newNetworkPorts.acknowledge() }
+        }
         rebuildPorts()
         hasSampled = true
     }
@@ -235,7 +313,14 @@ final class ProcessMonitor {
     }
 
     private func rebuildPorts() {
-        portRows = PortList.filtered(allPorts, query: query)
+        let matching = PortList.filtered(allPorts, query: query)
+        var counts = PortCounts()
+        for binding in matching {
+            if binding.proto == .tcp { counts.tcp += 1 } else { counts.udp += 1 }
+            if binding.isNetworkReachable { counts.network += 1 } else { counts.local += 1 }
+        }
+        if counts != portCounts { portCounts = counts }
+        portRows = PortList.filtered(matching, reach: portReach)
         if let portSelection, !portRows.contains(where: { $0.id == portSelection }) {
             self.portSelection = nil
         }
@@ -272,13 +357,45 @@ final class ProcessMonitor {
         return ids[min(max(index + offset, 0), ids.count - 1)]
     }
 
-    func clearSelectionOrQuery() {
-        if selection != nil || portSelection != nil {
+    func toggleSelection(_ pid: pid_t) {
+        selection = selection == pid ? nil : pid
+    }
+
+    func togglePortSelection(_ id: PortBinding.ID) {
+        portSelection = portSelection == id ? nil : id
+    }
+
+    func setHovered(_ id: AnyHashable, _ inside: Bool) {
+        if inside {
+            if hoveredRowID != id { hoveredRowID = id }
+        } else if hoveredRowID == id {
+            hoveredRowID = nil
+        }
+    }
+
+    var hasSelection: Bool { selectedTarget != nil }
+
+    /// What Esc undoes first: the settings view, the All users explanation, the selection, then the search.
+    var canCancel: Bool {
+        isShowingSettings || isExplainingSystemAccess || hasSelection || !query.isEmpty
+    }
+
+    func cancel() {
+        if isShowingSettings {
+            isShowingSettings = false
+        } else if isExplainingSystemAccess {
+            isExplainingSystemAccess = false
+        } else if selection != nil || portSelection != nil {
             selection = nil
             portSelection = nil
         } else {
             query = ""
         }
+    }
+
+    /// Ports a process holds, for the details card.
+    func ports(heldBy pid: pid_t) -> [PortBinding] {
+        allPorts.filter { $0.pid == pid }
     }
 
     // MARK: Termination
@@ -322,7 +439,7 @@ final class ProcessMonitor {
         switch error {
         case .protectedProcess: return "“\(name)” is protected and can't be ended here"
         case .notPermitted:
-            return systemAccess == .on ? "No permission to end “\(name)”" : "No permission to end “\(name)”; turn on System processes and try again"
+            return systemAccess == .on ? "No permission to end “\(name)”" : "No permission to end “\(name)”; switch to All users and try again"
         case .noSuchProcess: return "“\(name)” has already exited"
         case .failed(let code): return "Couldn't end “\(name)” (\(String(cString: strerror(code))))"
         }
@@ -357,12 +474,21 @@ final class ProcessMonitor {
 
     // MARK: System access
 
-    func toggleSystemAccess() {
-        switch systemAccess {
-        case .off: Task { await enableSystemAccess() }
-        case .on: disableSystemAccess()
-        case .requesting: break
-        }
+    /// "All users": explain first; the password prompt comes from `confirmAllUsers()`.
+    func requestAllUsers() {
+        if systemAccess == .off { isExplainingSystemAccess = true }
+    }
+
+    func confirmAllUsers() {
+        isExplainingSystemAccess = false
+        guard systemAccess == .off else { return }
+        Task { await enableSystemAccess() }
+    }
+
+    /// "Mine": stops the root helper if it's running.
+    func showMineOnly() {
+        isExplainingSystemAccess = false
+        if systemAccess == .on { disableSystemAccess() }
     }
 
     private func enableSystemAccess() async {

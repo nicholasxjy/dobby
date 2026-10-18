@@ -10,6 +10,9 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private let panel: StatusPanel
     private let monitor: ProcessMonitor
     private let menuBarStats: MenuBarStatsSettings
+    private let preferences = PreferencesSettings.shared
+    /// The alert readout is drawn in colors for the menu bar's appearance; redraw when that changes.
+    private var appearanceObservation: NSKeyValueObservation?
     private lazy var appIcon: NSImage? = {
         let image = NSImage(systemSymbolName: MenuBarReadout.appSymbol, accessibilityDescription: "Dobby")
         image?.isTemplate = true
@@ -35,6 +38,9 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             button.target = self
             button.action = #selector(toggle)
             button.sendAction(on: .leftMouseDown)
+            appearanceObservation = button.observe(\.effectiveAppearance) { [weak self] _, _ in
+                Task { @MainActor in self?.updateStatusItem() }
+            }
         }
         observeMenuBarStats()
     }
@@ -49,13 +55,16 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     }
 
     private func updateStatusItem() {
-        let enabled = menuBarStats.isEnabled
+        let items = preferences.menuBarItems
+        let enabled = menuBarStats.isEnabled && !items.isEmpty
         monitor.showsMenuBarStats = enabled
+        monitor.countsPortsInBackground = enabled && items.contains(.ports)
+        monitor.flagsNewNetworkPorts = enabled && items.contains(.ports) && preferences.flagsNewNetworkPorts
         guard let button = statusItem.button else { return }
         if enabled {
             let summary = monitor.menuBarSummary
             statusItem.length = NSStatusItem.variableLength
-            button.image = MenuBarReadout.image(for: summary)
+            button.image = MenuBarReadout.image(for: summary, items: items, appearance: button.effectiveAppearance)
             button.toolTip = summary.description
         } else {
             statusItem.length = NSStatusItem.squareLength

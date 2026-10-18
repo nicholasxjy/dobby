@@ -54,6 +54,15 @@ public struct MemoryStats: Equatable, Sendable {
     public let wiredBytes: UInt64
     public let compressedBytes: UInt64
     public let pressure: MemoryPressure
+
+    public init(usedBytes: UInt64, totalBytes: UInt64, appBytes: UInt64, wiredBytes: UInt64, compressedBytes: UInt64, pressure: MemoryPressure) {
+        self.usedBytes = usedBytes
+        self.totalBytes = totalBytes
+        self.appBytes = appBytes
+        self.wiredBytes = wiredBytes
+        self.compressedBytes = compressedBytes
+        self.pressure = pressure
+    }
 }
 
 public enum SystemStats {

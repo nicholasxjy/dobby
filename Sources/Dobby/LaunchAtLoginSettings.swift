@@ -20,6 +20,10 @@ final class LaunchAtLoginSettings {
         state = launchAtLogin.state
     }
 
+    func openLoginItems() {
+        SMAppService.openSystemSettingsLoginItems()
+    }
+
     /// Applies the toggle and returns a notice worth showing, if any.
     func setEnabled(_ enabled: Bool) -> (text: String, isError: Bool)? {
         do {
