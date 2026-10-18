@@ -186,8 +186,9 @@ private struct GraphWithLegend: View {
         VStack(alignment: .leading, spacing: 7) {
             HistoryGraph(series: series, capacity: 90)
                 .frame(height: 54)
+                // Both captions sit along the top, where usage rarely reaches.
                 .overlay(alignment: .topTrailing) { caption(scale).padding(.top, 3).padding(.trailing, 6) }
-                .overlay(alignment: .bottomLeading) { caption(span).padding(.bottom, 3).padding(.leading, 6) }
+                .overlay(alignment: .topLeading) { caption(span).padding(.top, 3).padding(.leading, 6) }
             HStack(spacing: 10) {
                 ForEach(legend, id: \.label) { item in
                     HStack(spacing: 4) {

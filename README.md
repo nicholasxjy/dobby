@@ -4,7 +4,7 @@ Dobby is a free macOS menu bar process monitor — a lighter, clearer take on Ac
 
 ## Demo
 
-![Dobby CPU tab showing usage history and system processes](docs/images/demo.png)
+![Dobby panel on the CPU view with a process selected, under the menu bar readout](docs/images/demo.png)
 
 ## Features
 
@@ -66,7 +66,7 @@ Optional variables:
 | --- | --- |
 | `DOBBY_SNAPSHOT_TAB` | `memory`, `ports`, `all-users` (the All users explanation), `settings`, `menubar` (the menu bar readout), `menubar-alert` (the readout with high memory pressure and a new LAN port); default: CPU |
 | `DOBBY_SNAPSHOT_THEME` | `system`, `light`, `dark` |
-| `DOBBY_SNAPSHOT_SELECT` | row index to select |
+| `DOBBY_SNAPSHOT_SELECT` | row index, or text in the process name, to select |
 | `DOBBY_SNAPSHOT_WAIT` | seconds to wait before capturing (default `2.6`) |
 
 ## License

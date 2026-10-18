@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Development aid: `DOBBY_SNAPSHOT=out.png Dobby` renders the panel to a PNG and exits.
 /// Optional: DOBBY_SNAPSHOT_TAB=memory|ports|all-users|settings|menubar|menubar-alert (menubar: the status item readout instead of
-/// the panel; menubar-alert: the same with high memory pressure and a new LAN port), DOBBY_SNAPSHOT_SELECT=<row index>, DOBBY_SNAPSHOT_THEME=system|light|dark,
+/// the panel; menubar-alert: the same with high memory pressure and a new LAN port), DOBBY_SNAPSHOT_SELECT=<row index or name>, DOBBY_SNAPSHOT_THEME=system|light|dark,
 /// DOBBY_SNAPSHOT_WAIT=<seconds before capture>.
 @MainActor
 enum SnapshotRenderer {
@@ -44,10 +44,14 @@ enum SnapshotRenderer {
         Task {
             // Longer waits let the history graphs fill in.
             try? await Task.sleep(for: .seconds(env["DOBBY_SNAPSHOT_WAIT"].flatMap(Double.init) ?? 2.6))
-            if let index = env["DOBBY_SNAPSHOT_SELECT"].flatMap(Int.init) {
+            if let select = env["DOBBY_SNAPSHOT_SELECT"] {
+                // A row index, or the first row whose name contains the text.
+                let index = Int(select) ?? (monitor.tab == .ports
+                    ? monitor.portRows.firstIndex { $0.name.localizedCaseInsensitiveContains(select) }
+                    : monitor.rows.firstIndex { $0.name.localizedCaseInsensitiveContains(select) }) ?? -1
                 if monitor.tab == .ports, monitor.portRows.indices.contains(index) {
                     monitor.portSelection = monitor.portRows[index].id
-                } else if monitor.rows.indices.contains(index) {
+                } else if monitor.tab != .ports, monitor.rows.indices.contains(index) {
                     monitor.selection = monitor.rows[index].pid
                 }
             }
