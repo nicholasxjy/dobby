@@ -100,7 +100,7 @@ struct SettingsView: View {
             if preferences.menuBarItems.isEmpty {
                 Text("Only the icon is shown").font(.system(size: 11)).foregroundStyle(.secondary)
             } else {
-                Image(nsImage: MenuBarReadout.image(for: monitor.menuBarSummary, items: preferences.menuBarItems, appearance: nil))
+                Image(nsImage: MenuBarReadout.image(for: monitor.menuBarSummary, items: preferences.menuBarItems))
                     .renderingMode(.template)
                     .foregroundStyle(.primary)
             }

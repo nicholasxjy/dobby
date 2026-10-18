@@ -11,8 +11,12 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private let monitor: ProcessMonitor
     private let menuBarStats: MenuBarStatsSettings
     private let preferences = PreferencesSettings.shared
-    /// The alert readout is drawn in colors for the menu bar's appearance; redraw when that changes.
-    private var appearanceObservation: NSKeyValueObservation?
+    private enum Shown: Equatable {
+        case icon
+        case readout(MenuBarSummary, MenuBarItems)
+    }
+    /// Every image change redraws the status item on each display, so only replace it when this changes.
+    private var shown: Shown?
     private lazy var appIcon: NSImage? = {
         let image = NSImage(systemSymbolName: MenuBarReadout.appSymbol, accessibilityDescription: "Dobby")
         image?.isTemplate = true
@@ -38,9 +42,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             button.target = self
             button.action = #selector(toggle)
             button.sendAction(on: .leftMouseDown)
-            appearanceObservation = button.observe(\.effectiveAppearance) { [weak self] _, _ in
-                Task { @MainActor in self?.updateStatusItem() }
-            }
         }
         observeMenuBarStats()
     }
@@ -61,10 +62,12 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         monitor.countsPortsInBackground = enabled && items.contains(.ports)
         monitor.flagsNewNetworkPorts = enabled && items.contains(.ports) && preferences.flagsNewNetworkPorts
         guard let button = statusItem.button else { return }
-        if enabled {
-            let summary = monitor.menuBarSummary
+        let next: Shown = enabled ? .readout(monitor.menuBarSummary, items) : .icon
+        guard next != shown else { return }
+        shown = next
+        if case .readout(let summary, let items) = next {
             statusItem.length = NSStatusItem.variableLength
-            button.image = MenuBarReadout.image(for: summary, items: items, appearance: button.effectiveAppearance)
+            button.image = MenuBarReadout.image(for: summary, items: items)
             button.toolTip = summary.description
         } else {
             statusItem.length = NSStatusItem.squareLength

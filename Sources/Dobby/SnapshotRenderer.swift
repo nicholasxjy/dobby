@@ -77,7 +77,7 @@ enum SnapshotRenderer {
     /// The template readout tinted as on a light or dark menu bar, at 2x.
     private static func writeMenuBar(_ summary: MenuBarSummary, to output: String) {
         let isDark = (NSApp.appearance ?? NSApp.effectiveAppearance).bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let readout = MenuBarReadout.image(for: summary, items: PreferencesSettings.shared.menuBarItems, appearance: NSAppearance(named: isDark ? .darkAqua : .aqua))
+        let readout = MenuBarReadout.image(for: summary, items: PreferencesSettings.shared.menuBarItems)
         let padding: CGFloat = 10
         let size = NSSize(width: readout.size.width + padding * 2, height: 24)
         let scale: CGFloat = 2
@@ -91,14 +91,16 @@ enum SnapshotRenderer {
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         (isDark ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.93, alpha: 1)).setFill()
         NSRect(origin: .zero, size: size).fill()
-        // A template readout takes the menu bar's text color; an alert readout is already colored.
+        // A template readout takes the menu bar's text color; an alert readout colors itself for the drawing appearance.
         let tinted = !readout.isTemplate ? readout : NSImage(size: readout.size, flipped: false) { rect in
             readout.draw(in: rect)
             (isDark ? NSColor.white : NSColor.black).set()
             rect.fill(using: .sourceAtop)
             return true
         }
-        tinted.draw(at: NSPoint(x: padding, y: (size.height - readout.size.height) / 2), from: .zero, operation: .sourceOver, fraction: 1)
+        NSAppearance(named: isDark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
+            tinted.draw(at: NSPoint(x: padding, y: (size.height - readout.size.height) / 2), from: .zero, operation: .sourceOver, fraction: 1)
+        }
         NSGraphicsContext.restoreGraphicsState()
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: output))
         exit(0)
