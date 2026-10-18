@@ -46,6 +46,20 @@ import Testing
         #expect(sleeper.path == "/bin/sleep")
     }
 
+    @Test func samplerNoticesWhenAProcessExecsAnotherProgram() throws {
+        let child = try spawn("/bin/sleep 0.4; exec /bin/sleep 5")
+        defer { child.terminate() }
+        usleep(100_000)
+        let sampler = ProcessSampler()
+        let before = try #require(sampler.snapshot().first { $0.pid == child.processIdentifier })
+        #expect(before.path != "/bin/sleep") // the shell (/bin/sh itself hands over to bash or dash)
+
+        usleep(600_000)
+        let after = try #require(sampler.snapshot().first { $0.pid == child.processIdentifier })
+        #expect(after.name == "sleep")
+        #expect(after.path == "/bin/sleep")
+    }
+
     @Test func samplerMeasuresBusyProcessCPU() throws {
         let child = try spawn("while :; do :; done")
         defer { child.terminate() }
