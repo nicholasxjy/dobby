@@ -3,7 +3,8 @@ import DobbyCore
 import SwiftUI
 
 /// Development aid: `DOBBY_SNAPSHOT=out.png Dobby` renders the panel to a PNG and exits.
-/// Optional: DOBBY_SNAPSHOT_TAB=memory|ports|menubar (menubar: the status item readout instead of the panel), DOBBY_SNAPSHOT_SELECT=<row index>, DOBBY_SNAPSHOT_THEME=system|light|dark,
+/// Optional: DOBBY_SNAPSHOT_TAB=memory|ports|all-users|settings|menubar|menubar-alert (menubar: the status item readout instead of
+/// the panel; menubar-alert: the same with high memory pressure and a new LAN port), DOBBY_SNAPSHOT_SELECT=<row index>, DOBBY_SNAPSHOT_THEME=system|light|dark,
 /// DOBBY_SNAPSHOT_WAIT=<seconds before capture>.
 @MainActor
 enum SnapshotRenderer {
@@ -20,12 +21,21 @@ enum SnapshotRenderer {
         switch env["DOBBY_SNAPSHOT_TAB"] {
         case "memory": monitor.tab = .memory
         case "ports": monitor.tab = .ports
+        case "all-users": monitor.isExplainingSystemAccess = true
+        case "settings":
+            monitor.showsMenuBarStats = true
+            monitor.isShowingSettings = true
         case "menubar":
             monitor.showsMenuBarStats = true
+            monitor.countsPortsInBackground = true
             Task {
                 try? await Task.sleep(for: .seconds(env["DOBBY_SNAPSHOT_WAIT"].flatMap(Double.init) ?? 2.6))
                 writeMenuBar(monitor.menuBarSummary, to: output)
             }
+            return true
+        case "menubar-alert":
+            let memory = MemoryStats(usedBytes: 56 << 30, totalBytes: 64 << 30, appBytes: 0, wiredBytes: 0, compressedBytes: 0, pressure: .warning)
+            writeMenuBar(MenuBarSummary(cpu: 0.16, memory: memory, portCount: 40, newNetworkPorts: ["python3 :8080"]), to: output)
             return true
         default: break
         }
@@ -44,7 +54,7 @@ enum SnapshotRenderer {
             try? await Task.sleep(for: .milliseconds(400))
 
             let hosting = NSHostingView(rootView: ContentView(monitor: monitor, theme: ThemeSettings.shared))
-            hosting.frame = NSRect(x: 0, y: 0, width: 400, height: 580)
+            hosting.frame = NSRect(x: 0, y: 0, width: 400, height: 640)
             let window = NSWindow(contentRect: hosting.frame, styleMask: [.borderless], backing: .buffered, defer: false)
             window.isOpaque = false
             window.backgroundColor = .clear
@@ -62,8 +72,8 @@ enum SnapshotRenderer {
 
     /// The template readout tinted as on a light or dark menu bar, at 2x.
     private static func writeMenuBar(_ summary: MenuBarSummary, to output: String) {
-        let readout = MenuBarReadout.image(for: summary)
         let isDark = (NSApp.appearance ?? NSApp.effectiveAppearance).bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let readout = MenuBarReadout.image(for: summary, items: PreferencesSettings.shared.menuBarItems, appearance: NSAppearance(named: isDark ? .darkAqua : .aqua))
         let padding: CGFloat = 10
         let size = NSSize(width: readout.size.width + padding * 2, height: 24)
         let scale: CGFloat = 2
@@ -77,7 +87,8 @@ enum SnapshotRenderer {
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         (isDark ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.93, alpha: 1)).setFill()
         NSRect(origin: .zero, size: size).fill()
-        let tinted = NSImage(size: readout.size, flipped: false) { rect in
+        // A template readout takes the menu bar's text color; an alert readout is already colored.
+        let tinted = !readout.isTemplate ? readout : NSImage(size: readout.size, flipped: false) { rect in
             readout.draw(in: rect)
             (isDark ? NSColor.white : NSColor.black).set()
             rect.fill(using: .sourceAtop)

@@ -57,12 +57,7 @@ public struct ProcessUsage: Identifiable, Equatable, Sendable {
 
     /// Name of the app this process helps, or nil when it is the app's main executable or not part of an app.
     public var owningAppName: String? {
-        guard let path, let appPath = appBundlePath else { return nil }
-        let mainExecutableDir = appPath + "/Contents/MacOS/"
-        if path.hasPrefix(mainExecutableDir), !path.dropFirst(mainExecutableDir.count).contains("/") {
-            return nil
-        }
-        return AppBundle.displayName(ofAppPath: appPath)
+        path.flatMap(AppBundle.owningAppName(ofExecutable:))
     }
 }
 
@@ -77,5 +72,45 @@ public enum SystemProcesses {
 
     public static func isCritical(pid: pid_t, executableName: String) -> Bool {
         pid <= 1 || critical.contains(executableName)
+    }
+}
+
+/// How a process reads in a list row: helpers sit under their app ("Google Chrome" · "Renderer helper").
+public struct ProcessDisplayLabel: Equatable, Sendable {
+    public let title: String
+    public let detail: String?
+
+    public init(title: String, detail: String?) {
+        self.title = title
+        self.detail = detail
+    }
+}
+
+extension ProcessDisplayLabel {
+    /// `otherOwner` is the owning account when it isn't the current user.
+    public init(name: String, owningAppName: String?, otherOwner: String?) {
+        var parts: [String] = []
+        var title = name
+        if let owningAppName {
+            title = owningAppName
+            parts.append(Self.helperRole(of: name) ?? name)
+        }
+        if let otherOwner { parts.append(otherOwner) }
+        self.init(title: title, detail: parts.isEmpty ? nil : parts.joined(separator: " · "))
+    }
+
+    /// "X Helper (Renderer)" -> "Renderer helper", "X Helper" -> "Helper"; nil for other names.
+    private static func helperRole(of name: String) -> String? {
+        if name.hasSuffix(")"), let open = name.lastIndex(of: "(") {
+            let role = name[name.index(after: open)..<name.index(before: name.endIndex)]
+            if !role.isEmpty { return "\(role) helper" }
+        }
+        return name.hasSuffix("Helper") ? "Helper" : nil
+    }
+}
+
+extension ProcessUsage {
+    public func displayLabel(currentUID: uid_t) -> ProcessDisplayLabel {
+        ProcessDisplayLabel(name: name, owningAppName: owningAppName, otherOwner: uid == currentUID ? nil : ownerName)
     }
 }
