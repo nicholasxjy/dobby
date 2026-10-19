@@ -123,7 +123,6 @@ struct VitalTile: View {
     let detail: String
     var detailColor: Color = .secondary
     let segments: [SegmentedMeter.Segment]
-    let shortcut: KeyEquivalent
     let isSelected: Bool
     let action: () -> Void
 
@@ -133,10 +132,6 @@ struct VitalTile: View {
                 HStack(spacing: 5) {
                     Image(systemName: symbol).font(.system(size: 10.5, weight: .semibold))
                     Text(title)
-                    Spacer(minLength: 2)
-                    Text("⌘\(String(shortcut.character))")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.tertiary)
                 }
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
@@ -164,9 +159,7 @@ struct VitalTile: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .keyboardShortcut(shortcut, modifiers: .command)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .help("\(title) (⌘\(String(shortcut.character)))")
     }
 }
 
