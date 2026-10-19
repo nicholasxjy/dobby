@@ -70,7 +70,6 @@ private struct VitalTiles: View {
                 value: load.map { percent($0.total) } ?? "—",
                 detail: "\(SystemStats.coreCount) cores",
                 segments: [.init(fraction: load?.user ?? 0, color: Palette.user), .init(fraction: load?.system ?? 0, color: Palette.system)],
-                shortcut: "1",
                 isSelected: monitor.tab == .cpu
             ) { monitor.tab = .cpu }
 
@@ -82,7 +81,6 @@ private struct VitalTiles: View {
                 detail: memory.map { "of \(wholeGigabytes($0.totalBytes)) · \(PressureStyle($0.pressure).label)" } ?? "—",
                 detailColor: memory.map { $0.pressure == .normal ? Color.secondary : PressureStyle($0.pressure).color } ?? .secondary,
                 segments: [.init(fraction: memory.map { Double($0.usedBytes) / Double(max($0.totalBytes, 1)) } ?? 0, color: PressureStyle(memory?.pressure).color)],
-                shortcut: "2",
                 isSelected: monitor.tab == .memory
             ) { monitor.tab = .memory }
 
@@ -96,7 +94,6 @@ private struct VitalTiles: View {
                 detail: "\(network) open to LAN",
                 detailColor: network > 0 ? Palette.warning : .secondary,
                 segments: ports.isEmpty ? [] : [.init(fraction: networkFraction, color: Palette.warningFill), .init(fraction: 1 - networkFraction, color: Palette.neutralBar)],
-                shortcut: "3",
                 isSelected: monitor.tab == .ports
             ) { monitor.tab = .ports }
         }
@@ -560,7 +557,7 @@ private struct FooterBar: View {
     private var hints: [(key: String?, label: String)] {
         monitor.hasSelection
             ? [("⌘⌫", "Quit"), ("⌥⌘⌫", "Force quit"), ("esc", "Close")]
-            : [("↑↓", "Select"), ("⌘1–3", "Views"), (nil, "Type to search")]
+            : [("↑↓", "Select"), (nil, "Type to search")]
     }
 }
 
