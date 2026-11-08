@@ -34,7 +34,7 @@ struct InspectorModel {
 }
 
 extension InspectorModel {
-    init(process row: ProcessUsage, icon: NSImage, ports: [PortBinding], isProtected: Bool, isConfirming: Bool) {
+    init(process row: ProcessUsage, metric: Metric, icon: NSImage, ports: [PortBinding], isProtected: Bool, isConfirming: Bool) {
         let cpuHeat = Heat.forValue(row.cpuPercent, metric: .cpu)
         let memoryHeat = Heat.forValue(Double(row.memoryBytes), metric: .memory)
         var subtitle = "PID \(row.pid)"
@@ -49,8 +49,12 @@ extension InspectorModel {
             title: row.name,
             subtitle: subtitle,
             stats: [
-                Stat(label: "CPU", value: UsageFormat.percent(row.cpuPercent), isWarning: cpuHeat != .normal),
-                Stat(label: "Memory", value: UsageFormat.bytes(row.memoryBytes), isWarning: memoryHeat != .normal),
+                metric == .network
+                    ? Stat(label: "Upload", value: row.network.map { UsageFormat.rate($0.upload) } ?? "—")
+                    : Stat(label: "CPU", value: UsageFormat.percent(row.cpuPercent), isWarning: cpuHeat != .normal),
+                metric == .network
+                    ? Stat(label: "Download", value: row.network.map { UsageFormat.rate($0.download) } ?? "—")
+                    : Stat(label: "Memory", value: UsageFormat.bytes(row.memoryBytes), isWarning: memoryHeat != .normal),
                 Stat(label: "User", value: row.ownerName ?? "—"),
                 Stat(label: "Ports", value: ports.isEmpty ? "None" : ports.map { ":\($0.port)" }.joined(separator: " ")),
             ],

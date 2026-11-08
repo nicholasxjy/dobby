@@ -16,6 +16,17 @@ public enum UsageFormat {
         return String(format: "%.1f GB", value / Double(1 << 30))
     }
 
+    /// Keep rates readable in narrow columns, including traffic below one kilobyte per second.
+    public static func rate(_ bytesPerSecond: Double) -> String {
+        let value = bytesPerSecond.isFinite ? max(bytesPerSecond, 0) : 0
+        if value < 1024 { return "\(Int(value.rounded())) B/s" }
+        let units = ["KB/s", "MB/s", "GB/s", "TB/s"]
+        var scaled = value / 1024
+        var unit = 0
+        while scaled >= 1024, unit < units.count - 1 { scaled /= 1024; unit += 1 }
+        return String(format: scaled < 10 ? "%.1f %@" : "%.0f %@", scaled, units[unit])
+    }
+
     public static func percent(_ percent: Double) -> String {
         String(format: "%.1f%%", percent)
     }

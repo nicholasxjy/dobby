@@ -78,6 +78,7 @@ struct SettingsView: View {
                             itemToggle(.cpu, "CPU")
                             itemToggle(.memory, "Memory")
                             itemToggle(.ports, "Ports")
+                            itemToggle(.network, "Network")
                         }
                         .font(.system(size: 12))
                     }

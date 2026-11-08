@@ -21,19 +21,29 @@ private func memory(used: UInt64, total: UInt64) -> MemoryStats {
         #expect(MenuBarSummary(cpu: nil, memory: memory(used: 20, total: 10), portCount: nil).memory == "100%")
     }
 
+    @Test func includesUploadAndDownload() {
+        let summary = MenuBarSummary(cpu: nil, memory: nil, portCount: nil, network: NetworkRate(upload: 1536, download: 2 * 1024 * 1024))
+        #expect(summary.upload == "1.5 KB/s")
+        #expect(summary.download == "2.0 MB/s")
+        #expect(summary.description.contains("Upload 1.5 KB/s · Download 2.0 MB/s"))
+        #expect(MenuBarItems.all.contains(.network))
+    }
+
     @Test func showsADashUntilSampled() {
         let summary = MenuBarSummary(cpu: nil, memory: nil, portCount: nil)
         #expect(summary.cpu == "–")
         #expect(summary.memory == "–")
         #expect(summary.ports == "–")
+        #expect(summary.upload == "–")
+        #expect(summary.download == "–")
         #expect(MenuBarSummary(cpu: nil, memory: memory(used: 0, total: 0), portCount: 0).memory == "–")
         #expect(MenuBarSummary(cpu: nil, memory: nil, portCount: 0).ports == "0")
     }
 
     @Test func describesTheValuesInFull() {
         let summary = MenuBarSummary(cpu: 0.5, memory: memory(used: 8 << 30, total: 16 << 30), portCount: 1)
-        #expect(summary.description == "CPU 50% · Memory 50% (8.00 GB of 16.00 GB) · 1 port")
-        #expect(MenuBarSummary(cpu: nil, memory: nil, portCount: 3).description == "CPU – · Memory – · 3 ports")
+        #expect(summary.description == "CPU 50% · Memory 50% (8.00 GB of 16.00 GB) · 1 port · Upload – · Download –")
+        #expect(MenuBarSummary(cpu: nil, memory: nil, portCount: 3).description == "CPU – · Memory – · 3 ports · Upload – · Download –")
     }
 }
 

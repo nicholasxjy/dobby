@@ -33,28 +33,39 @@ enum MenuBarReadout {
     private static let leadingGap: CGFloat = 8
     private static let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
     private static let appIcon = symbol(appSymbol, NSImage.SymbolConfiguration(pointSize: 13, weight: .regular))
-    private static let statIcons: [MenuBarItems: NSImage] = {
+    private static let statIcons: [String: NSImage] = {
         let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
-        return [.cpu: symbol("cpu", config), .memory: symbol("memorychip", config), .ports: symbol("network", config)]
+        return Dictionary(uniqueKeysWithValues: ["cpu", "memorychip", "network"].map { ($0, symbol($0, config)) })
     }()
-    /// Slots are at least two digits wide and numbers sit right-aligned, so typical changes don't shift the bar.
     private static let minimumWidths: [MenuBarItems: CGFloat] = [
         .cpu: textWidth("88%"), .memory: textWidth("88%"), .ports: textWidth("88"),
     ]
+    private static let networkFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
+    private static let networkIcons = ["arrow.up", "arrow.down"].map {
+        symbol($0, NSImage.SymbolConfiguration(pointSize: 7, weight: .semibold))
+    }
+    // Separate number and unit columns keep both rows aligned as rates change.
+    private static let networkValueWidth = ceil(("1024" as NSString).size(withAttributes: [.font: networkFont]).width)
+    private static let networkUnitWidth = ceil(("MB/s" as NSString).size(withAttributes: [.font: networkFont]).width)
+    private static let networkIconWidth = networkIcons.map(\.size.width).max() ?? 0
+    private static let networkWidth = networkIconWidth + iconTextGap + networkValueWidth + 2 + networkUnitWidth
 
     static func image(for summary: MenuBarSummary, items: MenuBarItems) -> NSImage {
-        let all: [(item: MenuBarItems, text: String, alert: Bool)] = [
-            (.cpu, summary.cpu, false),
-            (.memory, summary.memory, summary.isMemoryUnderPressure),
-            (.ports, summary.ports, !summary.newNetworkPorts.isEmpty),
+        let all: [(item: MenuBarItems, text: String, symbol: String, alert: Bool)] = [
+            (.cpu, summary.cpu, "cpu", false),
+            (.memory, summary.memory, "memorychip", summary.isMemoryUnderPressure),
+            (.ports, summary.ports, "network", !summary.newNetworkPorts.isEmpty),
         ]
         let stats = all.filter { items.contains($0.item) }
         let alerting = stats.contains { $0.alert }
         let laidOut = stats.map { stat in
-            (icon: statIcons[stat.item] ?? NSImage(), text: stat.text, alert: stat.alert,
+            (icon: statIcons[stat.symbol] ?? NSImage(), text: stat.text, alert: stat.alert,
              width: max(textWidth(stat.text), minimumWidths[stat.item] ?? 0))
         }
-        let statsWidth = laidOut.reduce(0) { $0 + $1.icon.size.width + iconTextGap + $1.width } + statGap * CGFloat(max(laidOut.count - 1, 0))
+        let showsNetwork = items.contains(.network)
+        let groupCount = laidOut.count + (showsNetwork ? 1 : 0)
+        let statsWidth = laidOut.reduce(0) { $0 + $1.icon.size.width + iconTextGap + $1.width }
+            + (showsNetwork ? networkWidth : 0) + statGap * CGFloat(max(groupCount - 1, 0))
         let width = ceil(appIcon.size.width + leadingGap + statsWidth)
 
         let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
@@ -75,6 +86,10 @@ enum MenuBarReadout {
                 text.draw(at: NSPoint(x: x + stat.width - text.size().width, y: baseline + font.descender))
                 x += stat.width
             }
+            if showsNetwork {
+                if !laidOut.isEmpty { x += statGap }
+                drawNetwork(summary, color: normal, at: x)
+            }
             return true
         }
         image.isTemplate = !alerting
@@ -82,14 +97,30 @@ enum MenuBarReadout {
         return image
     }
 
+    private static func drawNetwork(_ summary: MenuBarSummary, color: NSColor, at x: CGFloat) {
+        let secondary = color.withAlphaComponent(0.75)
+        for (index, rate) in [summary.upload, summary.download].enumerated() {
+            let centerY = height - (CGFloat(index) + 0.5) * height / 2
+            var iconX = x
+            draw(networkIcons[index], tint: secondary, at: &iconX, centerY: centerY)
+            let parts = rate.split(separator: " ", maxSplits: 1)
+            let value = NSAttributedString(string: String(parts.first ?? "–"), attributes: [.font: networkFont, .foregroundColor: color])
+            let unit = NSAttributedString(string: parts.count > 1 ? String(parts[1]) : "", attributes: [.font: networkFont, .foregroundColor: secondary])
+            let valueX = x + networkIconWidth + iconTextGap
+            let baseline = (centerY - networkFont.capHeight / 2).rounded() + networkFont.descender
+            value.draw(at: NSPoint(x: valueX + networkValueWidth - value.size().width, y: baseline))
+            unit.draw(at: NSPoint(x: valueX + networkValueWidth + 2, y: baseline))
+        }
+    }
+
     private static func symbol(_ name: String, _ config: NSImage.SymbolConfiguration) -> NSImage {
         NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config) ?? NSImage()
     }
 
     /// Draws `icon` as is, or filled with `tint` (in a transparency layer, so only the icon's pixels change).
-    private static func draw(_ icon: NSImage, tint: NSColor?, at x: inout CGFloat) {
+    private static func draw(_ icon: NSImage, tint: NSColor?, at x: inout CGFloat, centerY: CGFloat = height / 2) {
         let size = icon.size
-        let rect = NSRect(x: x, y: ((height - size.height) / 2).rounded(), width: size.width, height: size.height)
+        let rect = NSRect(x: x, y: (centerY - size.height / 2).rounded(), width: size.width, height: size.height)
         if let tint, let context = NSGraphicsContext.current?.cgContext {
             context.beginTransparencyLayer(in: rect, auxiliaryInfo: nil)
             icon.draw(in: rect)

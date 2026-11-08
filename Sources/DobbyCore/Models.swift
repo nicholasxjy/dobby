@@ -33,6 +33,8 @@ public struct ProcessUsage: Identifiable, Equatable, Sendable {
     /// Percent of one core; multi-threaded processes can exceed 100.
     public let cpuPercent: Double
     public let memoryBytes: UInt64
+    /// Nil until socket traffic has been sampled, or when this process has no network sockets.
+    public var network: NetworkRate?
 
     public var id: pid_t { pid }
 
@@ -64,6 +66,7 @@ public struct ProcessUsage: Identifiable, Equatable, Sendable {
 public enum Metric: String, CaseIterable, Sendable {
     case cpu
     case memory
+    case network
 }
 
 /// Processes whose termination crashes or logs out the session; Dobby refuses to end them.

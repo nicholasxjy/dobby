@@ -13,7 +13,7 @@ final class ProcessMonitor {
     }
 
     enum Tab: Hashable {
-        case cpu, memory, ports
+        case cpu, memory, ports, network
     }
 
     /// Whether the root helper is supplying every user's processes.
@@ -29,6 +29,7 @@ final class ProcessMonitor {
             hoveredRowID = nil
             rebuildRows(keepOrder: false)
             if tab == .ports { acknowledgeNewNetworkPorts() }
+            updateNetworkSampling()
         }
     }
     /// The Ports tab's All / LAN / Local filter.
@@ -39,6 +40,7 @@ final class ProcessMonitor {
     var isShowingSettings = false {
         didSet {
             guard isShowingSettings != oldValue else { return }
+            updateNetworkSampling()
             if isShowingSettings {
                 hoveredRowID = nil
                 isExplainingSystemAccess = false
@@ -51,7 +53,13 @@ final class ProcessMonitor {
     }
     /// "All users" was chosen; the explanation shows before the password prompt.
     var isExplainingSystemAccess = false
-    var metric: Metric { tab == .memory ? .memory : .cpu }
+    var metric: Metric {
+        switch tab {
+        case .cpu, .ports: .cpu
+        case .memory: .memory
+        case .network: .network
+        }
+    }
     var query = "" {
         didSet {
             guard query != oldValue else { return }
@@ -80,6 +88,10 @@ final class ProcessMonitor {
     /// Ports matching the search, split by reach, for the filter chips.
     private(set) var portCounts = PortCounts()
     private(set) var hasSampled = false
+    private(set) var network: NetworkRate?
+    private(set) var networkHistory: [NetworkRate] = []
+    private(set) var hasSampledNetwork = false
+    private(set) var networkError: String?
     /// Latest whole-system CPU split, plus history for the graphs (oldest first).
     private(set) var cpuLoad: CPULoad?
     private(set) var cpuHistory: [CPULoad] = []
@@ -120,6 +132,12 @@ final class ProcessMonitor {
     @ObservationIgnored private var cpuSamples = RingHistory<CPULoad>(capacity: 90)
     @ObservationIgnored private var memorySamples = RingHistory<Double>(capacity: 90)
     @ObservationIgnored private var latestMemory: MemoryStats?
+    @ObservationIgnored private var lastInterfaces: [UInt16: NetworkCounters]?
+    @ObservationIgnored private var lastNetworkTime: UInt64 = 0
+    @ObservationIgnored private var latestNetwork: NetworkRate?
+    @ObservationIgnored private var networkSamples = RingHistory<NetworkRate>(capacity: 90)
+    @ObservationIgnored private var networkTask: Task<Void, Never>?
+    @ObservationIgnored private var networkRates: [pid_t: NetworkRate] = [:]
     @ObservationIgnored private var iconCache: [String: NSImage] = [:]
     /// Same count as the Ports tab total; scanned in the background only for the menu bar readout.
     @ObservationIgnored private var portCount: Int?
@@ -153,7 +171,7 @@ final class ProcessMonitor {
     // MARK: Sampling
 
     init() {
-        // System totals are a couple of host_statistics calls: cheap enough to sample all the time,
+        // System totals use cheap host and interface counters, sampled all the time,
         // so the graphs already have history when the panel opens. Process sampling stays panel-only.
         Task { [weak self] in
             while !Task.isCancelled {
@@ -170,6 +188,16 @@ final class ProcessMonitor {
             cpuSamples.append(SystemStats.cpuLoad(from: lastTicks, to: ticks))
         }
         lastTicks = ticks
+        let now = DispatchTime.now().uptimeNanoseconds
+        let interfaces = NetworkStats.interfaces()
+        if let previous = lastInterfaces, let interfaces {
+            latestNetwork = NetworkStats.rate(previous: previous, current: interfaces, seconds: Double(now - lastNetworkTime) / 1e9)
+            if let latestNetwork { networkSamples.append(latestNetwork) }
+        } else {
+            latestNetwork = nil
+        }
+        lastInterfaces = interfaces
+        lastNetworkTime = now
         latestMemory = SystemStats.memory()
         if let latestMemory {
             memorySamples.append(Double(latestMemory.usedBytes) / Double(max(latestMemory.totalBytes, 1)))
@@ -189,7 +217,8 @@ final class ProcessMonitor {
             cpu: cpuSamples.values.last?.total,
             memory: latestMemory,
             portCount: portCount,
-            newNetworkPorts: flagsNewNetworkPorts ? newNetworkPorts.unseen.map(Self.portLabel) : []
+            newNetworkPorts: flagsNewNetworkPorts ? newNetworkPorts.unseen.map(Self.portLabel) : [],
+            network: latestNetwork
         )
         // Unchanged numbers shouldn't redraw the status item.
         if summary != menuBarSummary { menuBarSummary = summary }
@@ -226,6 +255,8 @@ final class ProcessMonitor {
         cpuLoad = cpuSamples.values.last
         memoryHistory = memorySamples.values
         memory = latestMemory
+        network = latestNetwork
+        networkHistory = networkSamples.values
     }
 
     func setVisible(_ visible: Bool) {
@@ -235,6 +266,7 @@ final class ProcessMonitor {
     func start() {
         guard refreshTask == nil else { return }
         isVisible = true
+        updateNetworkSampling()
         publishSystem()
         refreshTask = Task { [weak self] in
             // A fresh baseline first, so CPU reflects "now" rather than the time since the panel was last open.
@@ -251,6 +283,7 @@ final class ProcessMonitor {
         refreshTask?.cancel()
         refreshTask = nil
         isVisible = false
+        updateNetworkSampling()
         lastSampleTime = 0
         isPointerInList = false
         hoveredRowID = nil
@@ -287,6 +320,7 @@ final class ProcessMonitor {
         for index in fresh.indices {
             if let name = appNames[fresh[index].pid] { fresh[index].name = name }
             fresh[index].ownerName = userName(fresh[index].uid)
+            fresh[index].network = networkRates[fresh[index].pid]
         }
 
         usages = fresh
@@ -327,15 +361,54 @@ final class ProcessMonitor {
     }
 
     private func rebuildRows(keepOrder: Bool) {
-        var ranked = ProcessRanking.ranked(usages, by: metric, query: query)
+        let items = tab == .network ? usages.filter { $0.network != nil } : usages
+        var ranked = ProcessRanking.ranked(items, by: metric, query: query)
         if keepOrder {
             ranked = ProcessRanking.applyingFrozenOrder(ranked, previousOrder: rows.map(\.pid))
         }
         rows = ranked
         barScale = ProcessRanking.barScale(for: ranked, metric: metric)
-        processCount = usages.count
+        processCount = items.count
         if let selection, !ranked.contains(where: { $0.pid == selection }) {
             self.selection = nil
+        }
+    }
+
+    // MARK: Network traffic
+
+    func updateNetworkSampling() {
+        guard isVisible, tab == .network, !isShowingSettings else {
+            networkTask?.cancel()
+            networkTask = nil
+            return
+        }
+        guard networkTask == nil else { return }
+        networkRates = [:]
+        hasSampledNetwork = false
+        networkError = nil
+        for index in usages.indices { usages[index].network = nil }
+        rebuildRows(keepOrder: false)
+        networkTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                do {
+                    let rates = try await NetworkProcessSampler.sample(seconds: self.preferences.refreshInterval.seconds)
+                    try Task.checkCancellation()
+                    self.networkRates = rates
+                    self.hasSampledNetwork = true
+                    for index in self.usages.indices { self.usages[index].network = rates[self.usages[index].pid] }
+                    self.rebuildRows(keepOrder: self.isPointerInList)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    self.networkError = "Couldn't read process traffic. Try again."
+                    self.networkRates = [:]
+                    for index in self.usages.indices { self.usages[index].network = nil }
+                    self.rebuildRows(keepOrder: false)
+                    self.networkTask = nil
+                    return
+                }
+            }
         }
     }
 

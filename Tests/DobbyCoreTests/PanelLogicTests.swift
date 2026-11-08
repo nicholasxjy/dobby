@@ -165,6 +165,6 @@ import Testing
 
         let alert = MenuBarSummary(cpu: 0.1, memory: memory(pressure: .warning), portCount: 4, newNetworkPorts: ["python3 :8080"])
         #expect(alert.isMemoryUnderPressure)
-        #expect(alert.description == "CPU 10% · Memory 88% (56.00 GB of 64.00 GB, pressure high) · 4 ports, new on the network: python3 :8080")
+        #expect(alert.description == "CPU 10% · Memory 88% (56.00 GB of 64.00 GB, pressure high) · 4 ports, new on the network: python3 :8080 · Upload – · Download –")
     }
 }

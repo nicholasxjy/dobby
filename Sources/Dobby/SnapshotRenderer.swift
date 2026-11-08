@@ -3,7 +3,7 @@ import DobbyCore
 import SwiftUI
 
 /// Development aid: `DOBBY_SNAPSHOT=out.png Dobby` renders the panel to a PNG and exits.
-/// Optional: DOBBY_SNAPSHOT_TAB=memory|ports|all-users|settings|menubar|menubar-alert (menubar: the status item readout instead of
+/// Optional: DOBBY_SNAPSHOT_TAB=memory|ports|network|all-users|settings|menubar|menubar-alert (menubar: the status item readout instead of
 /// the panel; menubar-alert: the same with high memory pressure and a new LAN port), DOBBY_SNAPSHOT_SELECT=<row index or name>, DOBBY_SNAPSHOT_THEME=system|light|dark,
 /// DOBBY_SNAPSHOT_WAIT=<seconds before capture>.
 @MainActor
@@ -21,6 +21,7 @@ enum SnapshotRenderer {
         switch env["DOBBY_SNAPSHOT_TAB"] {
         case "memory": monitor.tab = .memory
         case "ports": monitor.tab = .ports
+        case "network": monitor.tab = .network
         case "all-users": monitor.isExplainingSystemAccess = true
         case "settings":
             monitor.showsMenuBarStats = true
@@ -35,7 +36,7 @@ enum SnapshotRenderer {
             return true
         case "menubar-alert":
             let memory = MemoryStats(usedBytes: 56 << 30, totalBytes: 64 << 30, appBytes: 0, wiredBytes: 0, compressedBytes: 0, pressure: .warning)
-            writeMenuBar(MenuBarSummary(cpu: 0.16, memory: memory, portCount: 40, newNetworkPorts: ["python3 :8080"]), to: output)
+            writeMenuBar(MenuBarSummary(cpu: 0.16, memory: memory, portCount: 40, newNetworkPorts: ["python3 :8080"], network: NetworkRate(upload: 24 * 1024, download: 1.5 * 1024 * 1024)), to: output)
             return true
         default: break
         }

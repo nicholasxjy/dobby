@@ -1,12 +1,14 @@
 import Foundation
 
-/// The compact CPU / memory / ports readout shown next to the menu bar icon.
+/// The compact CPU / memory / ports / network readout shown next to the menu bar icon.
 public struct MenuBarSummary: Equatable, Sendable, CustomStringConvertible {
     public static let placeholder = "–"
 
     public let cpu: String
     public let memory: String
     public let ports: String
+    public let upload: String
+    public let download: String
     /// Memory pressure is high or critical; the readout tints the memory figure.
     public let isMemoryUnderPressure: Bool
     /// Network-reachable ports opened since the user last looked, as "name :port".
@@ -15,12 +17,14 @@ public struct MenuBarSummary: Equatable, Sendable, CustomStringConvertible {
     public let description: String
 
     /// `cpu` is the busy fraction (0...1) of all cores; nil values haven't been sampled yet.
-    public init(cpu: Double?, memory: MemoryStats?, portCount: Int?, newNetworkPorts: [String] = []) {
+    public init(cpu: Double?, memory: MemoryStats?, portCount: Int?, newNetworkPorts: [String] = [], network: NetworkRate? = nil) {
         let memoryFraction = memory.flatMap { $0.totalBytes > 0 ? Double($0.usedBytes) / Double($0.totalBytes) : nil }
         self.cpu = cpu.map(Self.percent) ?? Self.placeholder
         self.memory = memoryFraction.map(Self.percent) ?? Self.placeholder
         self.ports = portCount.map(String.init) ?? Self.placeholder
         self.newNetworkPorts = newNetworkPorts
+        upload = network.map { UsageFormat.rate($0.upload) } ?? Self.placeholder
+        download = network.map { UsageFormat.rate($0.download) } ?? Self.placeholder
         let pressure: String? = switch memory?.pressure {
         case .warning: "high"
         case .critical: "critical"
@@ -36,7 +40,7 @@ public struct MenuBarSummary: Equatable, Sendable, CustomStringConvertible {
         if !newNetworkPorts.isEmpty {
             portsDetail += ", new on the network: \(newNetworkPorts.joined(separator: ", "))"
         }
-        description = "CPU \(self.cpu) · Memory \(memoryDetail) · \(portsDetail)"
+        description = "CPU \(self.cpu) · Memory \(memoryDetail) · \(portsDetail) · Upload \(upload) · Download \(download)"
     }
 
     private static func percent(_ fraction: Double) -> String {

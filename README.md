@@ -8,16 +8,17 @@ Dobby is a free macOS menu bar process monitor — a lighter, clearer take on Ac
 
 ## Features
 
-- **Vitals tiles.** CPU, Memory and Ports sit side by side at the top with their totals, a meter and a one-line summary. Click a tile to switch views. CPU and Memory show iStat Menus–style history graphs (CPU split into user/system, memory colored by pressure) with a legend; Ports shows filters instead.
+- **Vitals tiles.** CPU, Memory, Ports and Network sit side by side at the top with their totals, a meter and a one-line summary. Click a tile to switch views. CPU and Memory show iStat Menus–style history graphs (CPU split into user/system, memory colored by pressure) with a legend; Ports shows filters instead.
 - **Readable, stable lists.** CPU and memory lists sort by usage, highest first. Helpers are listed under their app with their role ("Google Chrome · Renderer helper"). Rows stop reordering while the pointer is over the list (the header shows **Paused**), so you never click the wrong process.
+- **Network traffic.** The Network tab shows each process's upload and download speed in B/s, KB/s or MB/s, sorted by combined traffic, with whole-Mac history and totals above. Totals count physical Ethernet, Wi-Fi and PPP interfaces, excluding loopback and virtual tunnels to avoid counting VPN traffic twice. Process traffic covers external TCP and UDP sockets; VPNs and proxies may also report traffic under their service processes, so the rows need not sum to the interface total. Process traffic is collected with macOS's `nettop` only while this tab is open.
 - **Port exposure at a glance.** The Ports view lists listening TCP and bound UDP ports by port number and filters them by reach: **All**, **LAN** (reachable from the network, in orange) or **Local** (this Mac only).
 - **Details card.** Selecting a row docks a card under the list: CPU, memory, owner, ports held (or, for a port, its reach, address and the other ports the same process holds), the executable path, and buttons to show it in Finder, copy the PID or port, or open a TCP port in the browser.
 - **Quit or force quit.** Hover a row and click the **×** that replaces its icon, or select it and choose **Quit** — apps get a normal Quit, other processes get SIGTERM — or **Force Quit** — SIGKILL; the button turns into **Confirm Force Quit** and explains the consequence, so press it twice. Closing a port means ending the process that holds it. Protected processes show a lock instead.
 - **Keyboard first.** Type to search, `↑` / `↓` to select, `⌘⌫` to quit, `⌥⌘⌫` to force quit, `⌘,` for settings, `Esc` to back out one step (settings, selection, search, then the panel), `⌘Q` to quit Dobby. The footer shows the shortcuts that apply right now, and the result of the last action.
-- **Light on resources.** Processes are sampled only while the panel is open (and not while the settings view is showing). A process's path and name are read once and cached until it exits or execs, so a sample of ~700 processes takes about 2 ms. System totals for the graphs are sampled in the background with two cheap host calls.
+- **Light on resources.** Processes are sampled only while the panel is open (and not while the settings view is showing). A process's path and name are read once and cached until it exits or execs, so a sample of ~700 processes takes about 2 ms. System totals for the graphs are sampled in the background with cheap host and network-interface counter calls.
 - **Settings** (gear icon in the footer, or `⌘,`):
   - **Appearance**: System, Light or Dark, remembered across launches.
-  - **Show stats next to the icon**: adds an iStat Menus–style readout next to the menu bar icon — CPU %, memory used % and the number of open ports, each as an icon plus a number, with a live preview. Choose which **items** to show. Hover the readout for the full values. Memory turns orange when memory pressure is high. While the ports item is shown, Dobby also counts ports in the background (a few milliseconds per refresh).
+  - **Show stats next to the icon**: adds an iStat Menus–style readout next to the menu bar icon — CPU %, memory used %, the number of open ports and total upload/download speed, with a live preview. CPU, memory and ports use an icon plus a number; network stacks upload above download in one compact column, with aligned numbers and units and a fixed width. Choose which **items** to show. Hover the readout for the full values. Memory turns orange when memory pressure is high. While the ports item is shown, Dobby also counts ports in the background (a few milliseconds per refresh).
   - **Flag new LAN ports**: turns the ports count orange when a process starts listening on the network, until you open the Ports view; the tooltip names the process and port.
   - **Launch at login**: starts Dobby automatically when you log in. macOS may ask you to allow it under *System Settings › General › Login Items*; Dobby opens that page for you, and **Open Login Items…** gets you back there. You can also turn it off there.
   - **Refresh every** 1, 2 or 5 seconds.
@@ -64,7 +65,7 @@ Optional variables:
 
 | Variable | Values |
 | --- | --- |
-| `DOBBY_SNAPSHOT_TAB` | `memory`, `ports`, `all-users` (the All users explanation), `settings`, `menubar` (the menu bar readout), `menubar-alert` (the readout with high memory pressure and a new LAN port); default: CPU |
+| `DOBBY_SNAPSHOT_TAB` | `memory`, `ports`, `network`, `all-users` (the All users explanation), `settings`, `menubar` (the menu bar readout), `menubar-alert` (the readout with high memory pressure and a new LAN port); default: CPU |
 | `DOBBY_SNAPSHOT_THEME` | `system`, `light`, `dark` |
 | `DOBBY_SNAPSHOT_SELECT` | row index, or text in the process name, to select |
 | `DOBBY_SNAPSHOT_WAIT` | seconds to wait before capturing (default `2.6`) |

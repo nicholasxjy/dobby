@@ -78,7 +78,7 @@ private struct VitalTiles: View {
                 title: "Memory",
                 symbol: "memorychip",
                 value: memory.map { UsageFormat.compactBytes($0.usedBytes) } ?? "—",
-                detail: memory.map { "of \(wholeGigabytes($0.totalBytes)) · \(PressureStyle($0.pressure).label)" } ?? "—",
+                detail: memory.map { "of \(wholeGigabytes($0.totalBytes))" } ?? "—",
                 detailColor: memory.map { $0.pressure == .normal ? Color.secondary : PressureStyle($0.pressure).color } ?? .secondary,
                 segments: [.init(fraction: memory.map { Double($0.usedBytes) / Double(max($0.totalBytes, 1)) } ?? 0, color: PressureStyle(memory?.pressure).color)],
                 isSelected: monitor.tab == .memory
@@ -91,11 +91,26 @@ private struct VitalTiles: View {
                 title: "Ports",
                 symbol: "network",
                 value: monitor.hasSampled ? String(ports.count) : "—",
-                detail: "\(network) open to LAN",
+                detail: "\(network) on LAN",
                 detailColor: network > 0 ? Palette.warning : .secondary,
                 segments: ports.isEmpty ? [] : [.init(fraction: networkFraction, color: Palette.warningFill), .init(fraction: 1 - networkFraction, color: Palette.neutralBar)],
                 isSelected: monitor.tab == .ports
             ) { monitor.tab = .ports }
+
+            let traffic = monitor.network
+            VitalTile(
+                title: "Network",
+                symbol: "arrow.up.arrow.down",
+                value: traffic.map { UsageFormat.rate($0.download) } ?? "—",
+                detail: traffic.map { "↑ \(UsageFormat.rate($0.upload))" } ?? "—",
+                valueFontSize: 14,
+                segments: traffic.map { rate in
+                    let scale = max(rate.total, 1024)
+                    return [.init(fraction: rate.download / scale, color: Palette.user), .init(fraction: rate.upload / scale, color: Palette.memory)]
+                } ?? [],
+                isSelected: monitor.tab == .network
+            ) { monitor.tab = .network }
+            .help("Download and upload speed across this Mac's physical network interfaces")
         }
     }
 
@@ -127,8 +142,27 @@ private struct DetailSection: View {
         switch monitor.tab {
         case .cpu: cpu
         case .memory: memory
+        case .network: network
         case .ports: PortFilters(monitor: monitor)
         }
+    }
+
+    private var network: some View {
+        let traffic = monitor.network
+        let scale = max(monitor.networkHistory.map(\.total).max() ?? 0, 1024)
+        return GraphWithLegend(
+            series: [
+                .init(values: monitor.networkHistory.map { $0.download / scale }, color: Palette.user),
+                .init(values: monitor.networkHistory.map { $0.upload / scale }, color: Palette.memory),
+            ],
+            scale: UsageFormat.rate(scale),
+            span: monitor.historySpan,
+            legend: [
+                LegendItem(label: "Download", value: traffic.map { UsageFormat.rate($0.download) } ?? "—", swatch: Palette.user),
+                LegendItem(label: "Upload", value: traffic.map { UsageFormat.rate($0.upload) } ?? "—", swatch: Palette.memory),
+            ],
+            valueWidth: Column.network
+        )
     }
 
     private var cpu: some View {
@@ -178,6 +212,7 @@ private struct GraphWithLegend: View {
     let scale: String
     let span: String
     let legend: [LegendItem]
+    var valueWidth: CGFloat?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -197,6 +232,7 @@ private struct GraphWithLegend: View {
                             .fontWeight(.semibold)
                             .monospacedDigit()
                             .foregroundStyle(item.valueColor)
+                            .frame(width: valueWidth, alignment: .trailing)
                     }
                 }
             }
@@ -443,7 +479,13 @@ private struct ListSection: View {
         let isEmpty = monitor.tab == .ports ? monitor.portRows.isEmpty : monitor.rows.isEmpty
         if !isEmpty {
             EmptyView()
-        } else if !monitor.hasSampled {
+        } else if monitor.tab == .network, let error = monitor.networkError {
+            VStack(spacing: 8) {
+                Text(error).font(.system(size: 12)).foregroundStyle(.secondary)
+                Button("Try Again") { monitor.updateNetworkSampling() }
+                    .buttonStyle(FlatButtonStyle())
+            }
+        } else if !monitor.hasSampled || (monitor.tab == .network && !monitor.hasSampledNetwork) {
             ProgressView().controlSize(.small)
         } else if !monitor.query.isEmpty {
             VStack(spacing: 4) {
@@ -455,6 +497,12 @@ private struct ListSection: View {
             }
             .padding(.horizontal, 20)
             .multilineTextAlignment(.center)
+        } else if monitor.tab == .network {
+            ContentUnavailableView(
+                "No network activity",
+                systemImage: "arrow.up.arrow.down",
+                description: Text("No matching process has an external TCP or UDP socket")
+            )
         } else if monitor.tab == .ports {
             ContentUnavailableView(
                 monitor.portReach == .all ? "No ports in use" : "No \(monitor.portReach == .network ? "LAN" : "local-only") ports",
@@ -490,6 +538,7 @@ private struct InspectorSection: View {
         guard let pid = monitor.selection, let row = monitor.rows.first(where: { $0.pid == pid }) else { return nil }
         return InspectorModel(
             process: row,
+            metric: monitor.metric,
             icon: monitor.icon(forAppBundle: row.appBundlePath),
             ports: monitor.ports(heldBy: pid),
             isProtected: monitor.protectedPIDs.contains(pid),

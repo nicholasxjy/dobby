@@ -47,6 +47,7 @@ enum Heat {
         switch metric {
         case .cpu: value >= 80 ? .high : value >= 25 ? .elevated : .normal
         case .memory: value >= Double(2 << 30) ? .high : value >= Double(512 << 20) ? .elevated : .normal
+        case .network: .normal
         }
     }
 
@@ -115,12 +116,13 @@ struct SegmentedMeter: View {
     }
 }
 
-/// One of the three headline tiles that double as the view switcher.
+/// One of the headline tiles that double as the view switcher.
 struct VitalTile: View {
     let title: String
     let symbol: String
     let value: String
     let detail: String
+    var valueFontSize: CGFloat = 19
     var detailColor: Color = .secondary
     let segments: [SegmentedMeter.Segment]
     let isSelected: Bool
@@ -136,12 +138,13 @@ struct VitalTile: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                 Text(value)
-                    .font(.system(size: 19, weight: .semibold).monospacedDigit())
+                    .font(.system(size: valueFontSize, weight: .semibold).monospacedDigit())
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
+                    .frame(height: 23, alignment: .leading)
                 SegmentedMeter(segments: segments)
                 Text(detail)
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 10.5).monospacedDigit())
                     .foregroundStyle(detailColor)
                     .lineLimit(1)
             }

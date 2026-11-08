@@ -10,6 +10,7 @@ enum Column {
     static let port: CGFloat = 44
     static let proto: CGFloat = 30
     static let reach: CGFloat = 58
+    static let network: CGFloat = 70
     static let rowHeight: CGFloat = 28
 }
 
@@ -62,16 +63,21 @@ struct ProcessRow: View, @MainActor Equatable {
                 .font(.system(size: 11).monospacedDigit())
                 .foregroundStyle(state.secondary)
                 .frame(width: Column.pid, alignment: .trailing)
-            MiniBar(
-                fraction: value / max(scale, 1),
-                color: state.isSelected ? .white : heat.barColor,
-                track: state.isSelected ? .white.opacity(0.28) : Palette.track,
-                width: Column.bar
-            )
-            Text(formatted(value))
-                .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                .foregroundStyle(state.isSelected ? .white : heat.textColor)
-                .frame(width: Column.value, alignment: .trailing)
+            if metric == .network {
+                networkValue(row.network?.upload ?? 0, label: "Upload")
+                networkValue(row.network?.download ?? 0, label: "Download")
+            } else {
+                MiniBar(
+                    fraction: value / max(scale, 1),
+                    color: state.isSelected ? .white : heat.barColor,
+                    track: state.isSelected ? .white.opacity(0.28) : Palette.track,
+                    width: Column.bar
+                )
+                Text(formatted(value))
+                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(state.isSelected ? .white : heat.textColor)
+                    .frame(width: Column.value, alignment: .trailing)
+            }
         }
         .modifier(RowChrome(state: state, id: AnyHashable(row.pid), monitor: monitor) {
             monitor.toggleSelection(row.pid)
@@ -88,10 +94,19 @@ struct ProcessRow: View, @MainActor Equatable {
         }
     }
 
+    private func networkValue(_ value: Double, label: String) -> some View {
+        Text(UsageFormat.rate(value))
+            .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+            .foregroundStyle(state.primary)
+            .frame(width: Column.network, alignment: .trailing)
+            .accessibilityLabel("\(label): \(UsageFormat.rate(value))")
+    }
+
     private func formatted(_ value: Double) -> String {
         switch metric {
         case .cpu: UsageFormat.percent(value)
         case .memory: UsageFormat.bytes(row.memoryBytes)
+        case .network: UsageFormat.rate(value)
         }
     }
 }
@@ -178,11 +193,24 @@ struct ProcessColumnHeader: View {
             HeaderBadges(isAdminOn: isAdminOn, isPaused: isPaused)
             Spacer(minLength: 4)
             Text("PID").frame(width: Column.pid, alignment: .trailing)
-            Text(metric == .cpu ? "CPU ↓" : "Memory ↓")
-                .frame(width: Column.bar + 8 + Column.value, alignment: .trailing)
+            if metric == .network {
+                Text("Upload").frame(width: Column.network, alignment: .trailing)
+                Text("Download").frame(width: Column.network, alignment: .trailing)
+            } else {
+                Text(metric == .cpu ? "CPU ↓" : "Memory ↓")
+                    .frame(width: Column.bar + 8 + Column.value, alignment: .trailing)
+            }
         }
         .modifier(ColumnHeaderStyle())
-        .help(metric == .cpu ? "CPU is relative to one core (100% = one full core)" : "Memory is the process's actual footprint (same as Activity Monitor)")
+        .help(help)
+    }
+
+    private var help: String {
+        switch metric {
+        case .cpu: "CPU is relative to one core (100% = one full core)"
+        case .memory: "Memory is the process's actual footprint (same as Activity Monitor)"
+        case .network: "External TCP and UDP traffic in bytes per second, sorted by combined upload and download. VPN and proxy traffic can also appear under their service processes."
+        }
     }
 }
 

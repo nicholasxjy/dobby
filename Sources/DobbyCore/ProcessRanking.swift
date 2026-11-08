@@ -29,6 +29,7 @@ public enum ProcessRanking {
         switch metric {
         case .cpu: return max(top, 50)
         case .memory: return max(top, Double(1 << 30))
+        case .network: return max(top, 1024)
         }
     }
 
@@ -36,6 +37,7 @@ public enum ProcessRanking {
         switch metric {
         case .cpu: return item.cpuPercent
         case .memory: return Double(item.memoryBytes)
+        case .network: return item.network?.total ?? 0
         }
     }
 

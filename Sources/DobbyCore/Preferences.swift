@@ -11,7 +11,8 @@ public struct MenuBarItems: OptionSet, Sendable, Hashable {
     public static let cpu = MenuBarItems(rawValue: 1 << 0)
     public static let memory = MenuBarItems(rawValue: 1 << 1)
     public static let ports = MenuBarItems(rawValue: 1 << 2)
-    public static let all: MenuBarItems = [.cpu, .memory, .ports]
+    public static let network = MenuBarItems(rawValue: 1 << 3)
+    public static let all: MenuBarItems = [.cpu, .memory, .ports, .network]
 }
 
 /// How often the open panel samples processes and the graphs take a point.
