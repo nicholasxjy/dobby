@@ -27,14 +27,18 @@ final class MenuBarStatsSettings {
 enum MenuBarReadout {
     static let appSymbol = "gauge.with.dots.needle.50percent"
 
-    private static let height: CGFloat = 18
+    private static let height: CGFloat = 20
     private static let iconTextGap: CGFloat = 2
     private static let statGap: CGFloat = 7
     private static let leadingGap: CGFloat = 8
     private static let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-    private static let appIcon = symbol(appSymbol, NSImage.SymbolConfiguration(pointSize: 13, weight: .regular))
+    static let appIcon: NSImage = {
+        let image = symbol(appSymbol, NSImage.SymbolConfiguration(pointSize: 16, weight: .medium))
+        image.accessibilityDescription = "Dobby"
+        return image
+    }()
     private static let statIcons: [String: NSImage] = {
-        let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
         return Dictionary(uniqueKeysWithValues: ["cpu", "memorychip", "network"].map { ($0, symbol($0, config)) })
     }()
     private static let minimumWidths: [MenuBarItems: CGFloat] = [
@@ -42,7 +46,7 @@ enum MenuBarReadout {
     ]
     private static let networkFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
     private static let networkIcons = ["arrow.up", "arrow.down"].map {
-        symbol($0, NSImage.SymbolConfiguration(pointSize: 7, weight: .semibold))
+        symbol($0, NSImage.SymbolConfiguration(pointSize: 8, weight: .semibold))
     }
     // Separate number and unit columns keep both rows aligned as rates change.
     private static let networkValueWidth = ceil(("1024" as NSString).size(withAttributes: [.font: networkFont]).width)

@@ -132,8 +132,10 @@ struct VitalTile: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
-                    Image(systemName: symbol).font(.system(size: 10.5, weight: .semibold))
-                    Text(title)
+                    Image(systemName: symbol)
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 18, height: 18)
+                    Text(title).lineLimit(1)
                 }
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)

@@ -17,11 +17,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     }
     /// Every image change redraws the status item on each display, so only replace it when this changes.
     private var shown: Shown?
-    private lazy var appIcon: NSImage? = {
-        let image = NSImage(systemSymbolName: MenuBarReadout.appSymbol, accessibilityDescription: "Dobby")
-        image?.isTemplate = true
-        return image
-    }()
     /// Clicking the icon while open first resigns the panel's key status; don't reopen on that same click.
     private var lastHidden = Date.distantPast
     /// Clicks in other apps, the desktop or the menu bar, while the panel is open.
@@ -71,7 +66,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             button.toolTip = summary.description
         } else {
             statusItem.length = NSStatusItem.squareLength
-            button.image = appIcon
+            button.image = MenuBarReadout.appIcon
             button.toolTip = nil
         }
     }
