@@ -3,6 +3,8 @@ import Darwin
 /// Raw per-process counters captured at one point in time.
 public struct ProcessSnapshot: Equatable, Sendable, Codable {
     public let pid: pid_t
+    public let startTime: UInt64
+    public var identity: ProcessIdentity { ProcessIdentity(pid: pid, startTime: startTime) }
     public let name: String
     public let path: String?
     /// Owning user; `uid_t.max` when it couldn't be read.
@@ -12,11 +14,12 @@ public struct ProcessSnapshot: Equatable, Sendable, Codable {
     /// Physical footprint, the same figure Activity Monitor shows as "Memory".
     public let memoryBytes: UInt64
 
-    public init(pid: pid_t, name: String, path: String?, uid: uid_t, cpuTimeNanos: UInt64, memoryBytes: UInt64) {
+    public init(pid: pid_t, startTime: UInt64, name: String, path: String?, uid: uid_t, cpuTimeNanos: UInt64, memoryBytes: UInt64) {
         self.pid = pid
         self.name = name
         self.path = path
         self.uid = uid
+        self.startTime = startTime
         self.cpuTimeNanos = cpuTimeNanos
         self.memoryBytes = memoryBytes
     }
@@ -25,6 +28,8 @@ public struct ProcessSnapshot: Equatable, Sendable, Codable {
 /// A process with usage derived from two consecutive snapshots.
 public struct ProcessUsage: Identifiable, Equatable, Sendable {
     public let pid: pid_t
+    public let startTime: UInt64
+    public var identity: ProcessIdentity { ProcessIdentity(pid: pid, startTime: startTime) }
     public var name: String
     public let path: String?
     public let uid: uid_t
@@ -36,13 +41,14 @@ public struct ProcessUsage: Identifiable, Equatable, Sendable {
     /// Nil until socket traffic has been sampled, or when this process has no network sockets.
     public var network: NetworkRate?
 
-    public var id: pid_t { pid }
+    public var id: ProcessIdentity { identity }
 
-    public init(pid: pid_t, name: String, path: String?, uid: uid_t, cpuPercent: Double, memoryBytes: UInt64) {
+    public init(pid: pid_t, startTime: UInt64, name: String, path: String?, uid: uid_t, cpuPercent: Double, memoryBytes: UInt64) {
         self.pid = pid
         self.name = name
         self.path = path
         self.uid = uid
+        self.startTime = startTime
         self.cpuPercent = cpuPercent
         self.memoryBytes = memoryBytes
     }

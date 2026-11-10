@@ -77,54 +77,102 @@ import Testing
         #expect(busy.cpuPercent < 130)
     }
 
-    @Test func quitTerminatesNormalProcess() throws {
+    @Test(.enabled(if: ProcessIdentity.supportsSignals, "Requires identity-bound process signals"))
+    func quitTerminatesNormalProcess() throws {
         let child = try spawn("exec /bin/sleep 30")
         usleep(50_000)
-        try ProcessTerminator().terminate(child.processIdentifier, mode: .quit)
+        try ProcessTerminator().terminate(ProcessIdentity.current(pid: child.processIdentifier), mode: .quit)
         #expect(waitForExit(child))
         #expect(child.terminationReason == .uncaughtSignal)
         #expect(child.terminationStatus == SIGTERM)
     }
 
-    @Test func forceQuitKillsProcessThatIgnoresQuit() throws {
+    @Test(.enabled(if: ProcessIdentity.supportsSignals, "Requires identity-bound process signals"))
+    func forceQuitKillsProcessThatIgnoresQuit() throws {
         let child = try spawn("trap '' TERM; while :; do sleep 0.05; done")
         defer { if child.isRunning { kill(child.processIdentifier, SIGKILL) } }
         usleep(100_000)
         let terminator = ProcessTerminator()
 
-        try terminator.terminate(child.processIdentifier, mode: .quit)
+        try terminator.terminate(ProcessIdentity.current(pid: child.processIdentifier), mode: .quit)
         #expect(!waitForExit(child, timeout: 0.5), "SIGTERM should be ignored by the trap")
 
-        try terminator.terminate(child.processIdentifier, mode: .forceQuit)
+        try terminator.terminate(ProcessIdentity.current(pid: child.processIdentifier), mode: .forceQuit)
         #expect(waitForExit(child))
         #expect(child.terminationStatus == SIGKILL)
     }
 
     @Test func quitPrefersGracefulAppQuitWhenAvailable() throws {
-        var signals: [(pid_t, Int32)] = []
-        var appQuits: [pid_t] = []
+        var signals: [(ProcessIdentity, Int32)] = []
+        var appQuits: [ProcessIdentity] = []
         let terminator = ProcessTerminator(
             sendSignal: { signals.append(($0, $1)); return 0 },
-            requestAppQuit: { appQuits.append($0); return $0 == 500 },
+            requestAppQuit: { appQuits.append($0); return $0.pid == 500 },
+            validate: { _ in },
             ownPID: 1
         )
-        try terminator.terminate(500, mode: .quit)
-        try terminator.terminate(501, mode: .quit)
-        try terminator.terminate(500, mode: .forceQuit)
-        #expect(appQuits == [500, 501])
-        #expect(signals.map(\.0) == [501, 500])
+        try terminator.terminate(ProcessIdentity(pid: 500, startTime: 1), mode: .quit)
+        try terminator.terminate(ProcessIdentity(pid: 501, startTime: 1), mode: .quit)
+        try terminator.terminate(ProcessIdentity(pid: 500, startTime: 1), mode: .forceQuit)
+        #expect(appQuits.map(\.pid) == [500, 501])
+        #expect(signals.map { $0.0.pid } == [501, 500])
         #expect(signals.map(\.1) == [SIGTERM, SIGKILL])
+    }
+
+    @Test func unavailableAtomicSignalsNeverFallBackToPIDOnlySignals() throws {
+        let child = try spawn("exec /bin/sleep 30")
+        defer { if child.isRunning { child.terminate() } }
+        let identity = try ProcessIdentity.current(pid: child.processIdentifier)
+        #expect(identity.send(SIGKILL, using: nil) == ENOTSUP)
+        #expect(child.isRunning)
+    }
+
+    @Test func staleIdentityCannotQuitOrSignalTheReplacement() throws {
+        let child = try spawn("exec /bin/sleep 30")
+        defer { if child.isRunning { child.terminate() } }
+        let current = try ProcessIdentity.current(pid: child.processIdentifier)
+        let stale = ProcessIdentity(pid: current.pid, startTime: current.startTime + 1)
+        var signals = 0
+        var appQuits = 0
+        let terminator = ProcessTerminator(
+            sendSignal: { _, _ in signals += 1; return 0 },
+            requestAppQuit: { _ in appQuits += 1; return true }
+        )
+        #expect(throws: TerminationError.noSuchProcess) { try terminator.terminate(stale, mode: .quit) }
+        #expect(throws: TerminationError.noSuchProcess) { try terminator.terminate(stale, mode: .forceQuit) }
+        #expect(signals == 0)
+        #expect(appQuits == 0)
+        #expect(stale.send(SIGKILL) == ESRCH)
+        #expect(child.isRunning)
+    }
+
+    @Test func signalBoundaryRejectsACurrentCriticalExecutable() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let binary = directory.appendingPathComponent("WindowServer")
+        try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: binary.path)
+        let child = Process()
+        child.executableURL = binary
+        child.arguments = ["30"]
+        try child.run()
+        defer { if child.isRunning { child.terminate() } }
+        let identity = try ProcessIdentity.current(pid: child.processIdentifier)
+        #expect(ProcessSampler.name(of: identity.pid) == "WindowServer")
+        #expect(identity.send(SIGKILL) == EPERM)
+        #expect(throws: TerminationError.protectedProcess) { try ProcessTerminator().terminate(identity, mode: .quit) }
+        #expect(child.isRunning)
     }
 
     @Test func refusesProtectedProcessesAndReportsErrors() {
         let terminator = ProcessTerminator()
-        #expect(throws: TerminationError.protectedProcess) { try terminator.terminate(0, mode: .forceQuit) }
-        #expect(throws: TerminationError.protectedProcess) { try terminator.terminate(1, mode: .forceQuit) }
-        #expect(throws: TerminationError.protectedProcess) { try terminator.terminate(getpid(), mode: .forceQuit) }
+        #expect(throws: TerminationError.protectedProcess) { try terminator.terminate(ProcessIdentity(pid: 0, startTime: 1), mode: .forceQuit) }
+        #expect(throws: TerminationError.protectedProcess) { try terminator.terminate(ProcessIdentity(pid: 1, startTime: 1), mode: .forceQuit) }
+        #expect(throws: TerminationError.protectedProcess) { try terminator.terminate(ProcessIdentity(pid: getpid(), startTime: 1), mode: .forceQuit) }
         // launchd-owned root process: not permitted for a normal user.
         if getuid() != 0, let root = rootOwnedPID() {
-            #expect(throws: TerminationError.notPermitted) { try terminator.terminate(root, mode: .quit) }
+            #expect(throws: TerminationError.notPermitted) { try terminator.terminate(ProcessIdentity.current(pid: root), mode: .quit) }
         }
-        #expect(throws: TerminationError.noSuchProcess) { try terminator.terminate(999_999, mode: .quit) }
+        #expect(throws: TerminationError.noSuchProcess) { try terminator.terminate(ProcessIdentity(pid: 999_999, startTime: 1), mode: .quit) }
     }
 }

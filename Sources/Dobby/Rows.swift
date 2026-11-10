@@ -22,9 +22,10 @@ struct RowState: Equatable {
     var isHovering: Bool
     /// Critical system process that Dobby won't end.
     var isProtected: Bool
+    var hasIdentity = true
 
     /// Hovering an endable, unselected row swaps its icon for a quit button.
-    var showsQuitButton: Bool { isHovering && !isSelected && !isProtected }
+    var showsQuitButton: Bool { isHovering && !isSelected && !isProtected && hasIdentity }
     var primary: Color { isSelected ? .white : .primary }
     var secondary: Color { isSelected ? .white.opacity(0.8) : .secondary }
 }
@@ -49,7 +50,7 @@ struct ProcessRow: View, @MainActor Equatable {
         let label = row.displayLabel(currentUID: getuid())
         HStack(spacing: 8) {
             RowLeading(icon: icon, state: state, quitHelp: "Quit “\(row.name)” (⌘⌫)") {
-                monitor.quit(pid: row.pid, name: row.name)
+                monitor.quit(identity: row.identity, name: row.name)
             }
             NameLabel(title: label.title, detail: label.detail, state: state)
             Spacer(minLength: 4)
@@ -79,11 +80,11 @@ struct ProcessRow: View, @MainActor Equatable {
                     .frame(width: Column.value, alignment: .trailing)
             }
         }
-        .modifier(RowChrome(state: state, id: AnyHashable(row.pid), monitor: monitor) {
-            monitor.toggleSelection(row.pid)
+        .modifier(RowChrome(state: state, id: AnyHashable(row.identity), monitor: monitor) {
+            monitor.toggleSelection(row.identity)
         })
         .contextMenu {
-            TerminationMenuItems(monitor: monitor, pid: row.pid, name: row.name)
+            TerminationMenuItems(monitor: monitor, identity: row.identity, name: row.name)
                 .disabled(state.isProtected)
             Divider()
             Button("Copy PID") { Pasteboard.copy(String(row.pid)) }
@@ -136,7 +137,7 @@ struct PortRow: View, @MainActor Equatable {
                 .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(state.isSelected ? .white.opacity(0.45) : Palette.border))
                 .frame(width: Column.proto, alignment: .leading)
             RowLeading(icon: icon, state: state, quitHelp: "Quit “\(binding.name)”, which holds this port (⌘⌫)") {
-                monitor.quit(pid: binding.pid, name: binding.name)
+                if let identity = binding.identity { monitor.quit(identity: identity, name: binding.name) }
             }
             NameLabel(title: label.title, detail: label.detail, state: state)
             Spacer(minLength: 4)
@@ -151,7 +152,7 @@ struct PortRow: View, @MainActor Equatable {
             monitor.togglePortSelection(binding.id)
         })
         .contextMenu {
-            TerminationMenuItems(monitor: monitor, pid: binding.pid, name: binding.name)
+            TerminationMenuItems(monitor: monitor, identity: binding.identity, name: binding.name)
                 .disabled(state.isProtected)
             Divider()
             Button("Copy Port") { Pasteboard.copy(String(binding.port)) }
@@ -349,12 +350,15 @@ struct AppIcon: View {
 
 private struct TerminationMenuItems: View {
     let monitor: ProcessMonitor
-    let pid: pid_t
+    let identity: ProcessIdentity?
     let name: String
 
     var body: some View {
-        Button("Quit") { monitor.quit(pid: pid, name: name) }
-        Button("Force Quit") { monitor.forceQuit(pid: pid, name: name, confirmed: true) }
+        Button("Quit") { if let identity { monitor.quit(identity: identity, name: name) } }
+            .disabled(identity == nil)
+        Button("Force Quit") { if let identity { monitor.forceQuit(identity: identity, name: name, confirmed: true) } }
+            .disabled(identity == nil || !ProcessIdentity.supportsSignals)
+            .help(ProcessIdentity.supportsSignals ? "End immediately; unsaved data is lost" : "Safe process signals require macOS 15 or later")
     }
 }
 

@@ -35,6 +35,21 @@ import Testing
         #expect(bindings.first { $0.port == 5353 }?.exposure == .specific)
     }
 
+    @Test(arguments: ["127.0.0.2", "127.255.255.254", "::1", "0:0:0:0:0:0:0:1", "::ffff:127.0.0.2"])
+    func loopbackAliasesStayLocal(address: String) {
+        let bindings = PortList.bindings(from: [SocketEntry(pid: 10, proto: .tcp, address: address, port: 3000)], processes: [:])
+        #expect(bindings.first?.exposure == .loopback)
+        #expect(PortList.filtered(bindings, reach: .network).isEmpty)
+    }
+
+    @Test func loopbackAliasesDoNotTriggerLANAlerts() {
+        var watch = NewNetworkPorts()
+        watch.update(with: [])
+        let bindings = PortList.bindings(from: [SocketEntry(pid: 10, proto: .tcp, address: "127.0.0.2", port: 3000)], processes: [:])
+        watch.update(with: bindings)
+        #expect(watch.unseen.isEmpty)
+    }
+
     @Test func fallsBackToPIDWhenProcessNameUnknown() {
         let bindings = PortList.bindings(from: entries, processes: processes)
         #expect(bindings.first { $0.pid == 12 }?.name == "PID 12")
@@ -129,7 +144,8 @@ import Testing
         #expect(mine(port).isEmpty)
     }
 
-    @Test func endingTheOwningProcessFreesThePort() throws {
+    @Test(.enabled(if: ProcessIdentity.supportsSignals, "Requires identity-bound process signals"))
+    func endingTheOwningProcessFreesThePort() throws {
         // Reserve a free port number, then let a child process listen on it.
         let (probe, port) = try makeSocket(SOCK_STREAM, ipv6: false, loopback: true)
         close(probe)
@@ -146,7 +162,7 @@ import Testing
         }
         #expect(found.map(\.pid) == [child.processIdentifier])
 
-        try ProcessTerminator().terminate(child.processIdentifier, mode: .quit)
+        try ProcessTerminator().terminate(ProcessIdentity.current(pid: child.processIdentifier), mode: .quit)
         child.waitUntilExit()
         #expect(PortScanner().scan().filter { $0.port == port && $0.proto == .tcp }.isEmpty)
     }

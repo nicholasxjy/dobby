@@ -13,7 +13,7 @@ Dobby is a free macOS menu bar process monitor — a lighter, clearer take on Ac
 - **Network traffic.** The Network tab shows each process's upload and download speed in B/s, KB/s or MB/s, sorted by combined traffic, with whole-Mac history and totals above. Totals count physical Ethernet, Wi-Fi and PPP interfaces, excluding loopback and virtual tunnels to avoid counting VPN traffic twice. Process traffic covers external TCP and UDP sockets; VPNs and proxies may also report traffic under their service processes, so the rows need not sum to the interface total. Process traffic is collected with macOS's `nettop` only while this tab is open.
 - **Port exposure at a glance.** The Ports view lists listening TCP and bound UDP ports by port number and filters them by reach: **All**, **LAN** (reachable from the network, in orange) or **Local** (this Mac only).
 - **Details card.** Selecting a row docks a card under the list: CPU, memory, owner, ports held (or, for a port, its reach, address and the other ports the same process holds), the executable path, and buttons to show it in Finder, copy the PID or port, or open a TCP port in the browser.
-- **Quit or force quit.** Hover a row and click the **×** that replaces its icon, or select it and choose **Quit** — apps get a normal Quit, other processes get SIGTERM — or **Force Quit** — SIGKILL; the button turns into **Confirm Force Quit** and explains the consequence, so press it twice. Closing a port means ending the process that holds it. Protected processes show a lock instead.
+- **Quit or force quit.** Hover a row and click the **×** that replaces its icon, or select it and choose **Quit** — apps get a normal Quit, other processes get SIGTERM — or **Force Quit** — SIGKILL; the button turns into **Confirm Force Quit** and explains the consequence, so press it twice. Closing a port means ending the process that holds it. Protected processes show a lock instead. Actions retain the process start identity, so a recycled PID cannot redirect them. Safe SIGTERM/SIGKILL signals require macOS 15 or later; on macOS 14, normal app Quit remains available and Force Quit is disabled.
 - **Keyboard first.** Type to search, `↑` / `↓` to select, `⌘⌫` to quit, `⌥⌘⌫` to force quit, `⌘,` for settings, `Esc` to back out one step (settings, selection, search, then the panel), `⌘Q` to quit Dobby. The footer shows the shortcuts that apply right now, and the result of the last action.
 - **Light on resources.** Processes are sampled only while the panel is open (and not while the settings view is showing). A process's path and name are read once and cached until it exits or execs, so a sample of ~700 processes takes about 2 ms. System totals for the graphs are sampled in the background with cheap host and network-interface counter calls.
 - **Settings** (gear icon in the footer, or `⌘,`):
@@ -30,13 +30,14 @@ Choosing **All users** first explains what happens; **Continue…** asks for an 
 
 - only reads process and port data and relays SIGTERM / SIGKILL;
 - accepts requests only from the Dobby process that launched it;
+- validates process start identity before signaling; requests run off the UI thread with a three-second deadline covering queueing, writes and reads;
 - exits when Dobby quits or you switch back to **Mine**, so nothing stays installed.
 
 `launchd`, `kernel_task`, `WindowServer` and `loginwindow` can never be ended from Dobby.
 
 ## Requirements
 
-- macOS 14 or later
+- macOS 14 or later for monitoring and normal app Quit; macOS 15 or later for identity-safe process signals and Force Quit
 - Swift 6 (the Command Line Tools are enough; Xcode is not required)
 
 ## Build and run
@@ -52,6 +53,10 @@ The app icon is drawn in code: edit `scripts/make-icon.swift`, then run `swift s
 `scripts/test.sh` works around a Command Line Tools bug where SwiftPM sometimes fails to find the swift-testing macro plugin.
 
 Launch at login and All users need the bundled app: run Dobby from `build/Dobby.app` (ideally moved to `/Applications`), not via `swift run`.
+
+## State transitions
+
+[The state-machine inventory](docs/state-machines.md) maps the panel, sampling, administrator helper, actions and settings, with their invariants, regression checks and remaining limitations.
 
 ## Snapshots
 

@@ -21,7 +21,7 @@ public struct SocketEntry: Equatable, Sendable, Codable {
 
 /// Who can reach a port.
 public enum PortExposure: Sendable {
-    /// Only this Mac (127.0.0.1 / ::1).
+    /// Only this Mac (127.0.0.0/8, ::1, or IPv4-mapped loopback).
     case loopback
     /// Every network interface (0.0.0.0 / ::), i.e. reachable from the network.
     case allInterfaces
@@ -32,6 +32,7 @@ public enum PortExposure: Sendable {
 /// A port held by a process, merged across IPv4/IPv6 sockets.
 public struct PortBinding: Identifiable, Equatable, Sendable {
     public let pid: pid_t
+    public let identity: ProcessIdentity?
     public let name: String
     public let path: String?
     public let ownerName: String?
@@ -39,12 +40,26 @@ public struct PortBinding: Identifiable, Equatable, Sendable {
     public let port: UInt16
     public let addresses: [String]
 
-    public var id: String { "\(pid)/\(proto.rawValue)/\(port)" }
+    public var id: String { "\(pid)/\(identity?.startTime ?? 0)/\(proto.rawValue)/\(port)" }
 
     public var exposure: PortExposure {
         if addresses.contains("*") { return .allInterfaces }
-        if addresses.allSatisfy({ $0 == "127.0.0.1" || $0 == "::1" }) { return .loopback }
+        if addresses.allSatisfy(Self.isLoopback) { return .loopback }
         return .specific
+    }
+
+    private static func isLoopback(_ address: String) -> Bool {
+        var ipv4 = in_addr()
+        if inet_pton(AF_INET, address, &ipv4) == 1 {
+            return UInt32(bigEndian: ipv4.s_addr) >> 24 == 127
+        }
+        var ipv6 = in6_addr()
+        guard inet_pton(AF_INET6, address, &ipv6) == 1 else { return false }
+        return withUnsafeBytes(of: ipv6) { bytes in
+            let loopback = bytes.prefix(15).allSatisfy { $0 == 0 } && bytes[15] == 1
+            let mapped = bytes.prefix(10).allSatisfy { $0 == 0 } && bytes[10] == 255 && bytes[11] == 255
+            return loopback || (mapped && bytes[12] == 127)
+        }
     }
 
     public var appBundlePath: String? {
@@ -72,6 +87,7 @@ public enum PortList {
             let process = processes[key.pid]
             return PortBinding(
                 pid: key.pid,
+                identity: process?.identity,
                 name: process?.name ?? "PID \(key.pid)",
                 path: process?.path,
                 ownerName: process?.ownerName,

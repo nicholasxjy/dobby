@@ -345,7 +345,7 @@ private struct SearchToolbar: View {
                     .init(value: Scope.mine, title: "Mine"),
                     .init(value: Scope.all, title: "All users", symbol: "shield", isBusy: monitor.systemAccess == .requesting),
                 ],
-                selection: monitor.systemAccess != .off || monitor.isExplainingSystemAccess ? Scope.all : Scope.mine
+                selection: monitor.systemAccess != .off ? Scope.all : Scope.mine
             ) { scope in
                 scope == .all ? monitor.requestAllUsers() : monitor.showMineOnly()
             }
@@ -377,7 +377,7 @@ private struct SystemAccessExplainer: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack(spacing: 6) {
-                Button("Not Now") { monitor.isExplainingSystemAccess = false }
+                Button("Not Now") { monitor.dismissSystemAccessExplanation() }
                     .buttonStyle(FlatButtonStyle())
                 Button {
                     monitor.confirmAllUsers()
@@ -414,7 +414,7 @@ private struct ListSection: View {
                                 PortRow(
                                     binding: binding,
                                     icon: monitor.icon(forAppBundle: binding.appBundlePath),
-                                    state: state(id: binding.id, pid: binding.pid, isSelected: monitor.portSelection == binding.id),
+                                    state: state(id: binding.id, pid: binding.pid, isSelected: monitor.portSelection == binding.id, hasIdentity: binding.identity != nil),
                                     monitor: monitor
                                 )
                                 .equatable()
@@ -427,11 +427,11 @@ private struct ListSection: View {
                                     metric: monitor.metric,
                                     scale: monitor.barScale,
                                     icon: monitor.icon(forAppBundle: row.appBundlePath),
-                                    state: state(id: row.pid, pid: row.pid, isSelected: monitor.selection == row.pid),
+                                    state: state(id: row.identity, pid: row.pid, isSelected: monitor.selection == row.identity),
                                     monitor: monitor
                                 )
                                 .equatable()
-                                .id(AnyHashable(row.pid))
+                                .id(AnyHashable(row.identity))
                             }
                         }
                     }
@@ -466,8 +466,8 @@ private struct ListSection: View {
         }
     }
 
-    private func state(id: AnyHashable, pid: pid_t, isSelected: Bool) -> RowState {
-        RowState(isSelected: isSelected, isHovering: monitor.hoveredRowID == id, isProtected: monitor.protectedPIDs.contains(pid))
+    private func state(id: AnyHashable, pid: pid_t, isSelected: Bool, hasIdentity: Bool = true) -> RowState {
+        RowState(isSelected: isSelected, isHovering: monitor.hoveredRowID == id, isProtected: monitor.protectedPIDs.contains(pid), hasIdentity: hasIdentity)
     }
 
     private func scroll(_ proxy: ScrollViewProxy, to id: AnyHashable?) {
@@ -532,17 +532,17 @@ private struct InspectorSection: View {
                 icon: monitor.icon(forAppBundle: binding.appBundlePath),
                 otherPorts: monitor.ports(heldBy: binding.pid).filter { $0.id != binding.id },
                 isProtected: monitor.protectedPIDs.contains(binding.pid),
-                isConfirming: monitor.confirmingForceQuit == binding.pid
+                isConfirming: binding.identity != nil && monitor.confirmingForceQuit == binding.identity
             )
         }
-        guard let pid = monitor.selection, let row = monitor.rows.first(where: { $0.pid == pid }) else { return nil }
+        guard let identity = monitor.selection, let row = monitor.rows.first(where: { $0.identity == identity }) else { return nil }
         return InspectorModel(
             process: row,
             metric: monitor.metric,
             icon: monitor.icon(forAppBundle: row.appBundlePath),
-            ports: monitor.ports(heldBy: pid),
-            isProtected: monitor.protectedPIDs.contains(pid),
-            isConfirming: monitor.confirmingForceQuit == pid
+            ports: monitor.ports(heldBy: row.pid),
+            isProtected: monitor.protectedPIDs.contains(row.pid),
+            isConfirming: monitor.confirmingForceQuit == identity
         )
     }
 }
@@ -604,9 +604,11 @@ private struct FooterBar: View {
     }
 
     private var hints: [(key: String?, label: String)] {
-        monitor.hasSelection
-            ? [("⌘⌫", "Quit"), ("⌥⌘⌫", "Force quit"), ("esc", "Close")]
-            : [("↑↓", "Select"), (nil, "Type to search")]
+        guard monitor.hasSelection else { return [("↑↓", "Select"), (nil, "Type to search")] }
+        var hints: [(key: String?, label: String)] = [("⌘⌫", "Quit")]
+        if ProcessIdentity.supportsSignals { hints.append(("⌥⌘⌫", "Force quit")) }
+        hints.append(("esc", "Close"))
+        return hints
     }
 }
 
@@ -641,16 +643,16 @@ private struct ShortcutButtons: View {
         let target = monitor.isShowingSettings ? nil : monitor.selectedTarget
         ZStack {
             Button("Quit Selected Process") {
-                if let target { monitor.quit(pid: target.pid, name: target.name) }
+                if let target { monitor.quit(identity: target.identity, name: target.name) }
             }
             .keyboardShortcut(.delete, modifiers: .command)
             .disabled(target == nil)
 
             Button("Force Quit Selected Process") {
-                if let target { monitor.forceQuit(pid: target.pid, name: target.name) }
+                if let target { monitor.forceQuit(identity: target.identity, name: target.name) }
             }
             .keyboardShortcut(.delete, modifiers: [.command, .option])
-            .disabled(target == nil)
+            .disabled(target == nil || !ProcessIdentity.supportsSignals)
 
             Button("Settings") {
                 monitor.isShowingSettings.toggle()

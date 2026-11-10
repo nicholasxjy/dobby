@@ -7,12 +7,14 @@ public enum UsageCalculator {
             var percent = 0.0
             if elapsedNanos > 0,
                let before = previousByPID[snapshot.pid],
+               before.identity == snapshot.identity,
                before.name == snapshot.name,
                snapshot.cpuTimeNanos >= before.cpuTimeNanos {
                 percent = Double(snapshot.cpuTimeNanos - before.cpuTimeNanos) / Double(elapsedNanos) * 100
             }
             return ProcessUsage(
                 pid: snapshot.pid,
+                startTime: snapshot.startTime,
                 name: snapshot.name,
                 path: snapshot.path,
                 uid: snapshot.uid,

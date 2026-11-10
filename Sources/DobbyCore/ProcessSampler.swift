@@ -56,6 +56,7 @@ public final class ProcessSampler {
         let ticks = usage.ri_user_time + usage.ri_system_time
         return ProcessSnapshot(
             pid: pid,
+            startTime: usage.ri_proc_start_abstime,
             name: identity.name,
             path: identity.path,
             uid: identity.uid,

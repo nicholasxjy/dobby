@@ -248,6 +248,7 @@ struct PillSegments<Value: Hashable>: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+                .accessibilityValue(option.isBusy ? "In progress" : "")
             }
         }
         .padding(2)

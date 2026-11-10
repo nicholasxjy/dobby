@@ -20,7 +20,7 @@ struct InspectorModel {
         case copy(label: String, text: String)
     }
 
-    let pid: pid_t
+    let identity: ProcessIdentity?
     let name: String
     let icon: NSImage
     let title: String
@@ -43,7 +43,7 @@ extension InspectorModel {
         if let path = row.path { actions.append(.reveal(row.appBundlePath ?? path)) }
         actions.append(.copy(label: "Copy PID", text: String(row.pid)))
         self.init(
-            pid: row.pid,
+            identity: row.identity,
             name: row.name,
             icon: icon,
             title: row.name,
@@ -85,7 +85,7 @@ extension InspectorModel {
         }
         actions.append(.copy(label: "Copy Port", text: String(binding.port)))
         self.init(
-            pid: binding.pid,
+            identity: binding.identity,
             name: binding.name,
             icon: icon,
             title: "Port \(binding.port) · \(binding.proto.rawValue.uppercased())",
@@ -169,7 +169,11 @@ struct InspectorCard: View {
                 .truncationMode(model.noteStyle == .path ? .middle : .tail)
                 .help(model.note)
 
-            if model.isProtected {
+            if model.identity == nil {
+                Text("Process identity unavailable. Wait for the list to refresh before quitting it.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+            } else if model.isProtected {
                 Label("Protected: ending \(model.name) would crash macOS or log you out.", systemImage: "lock.fill")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
@@ -183,14 +187,19 @@ struct InspectorCard: View {
                         actionButton(action)
                     }
                     Spacer(minLength: 6)
-                    Button("Quit") { monitor.quit(pid: model.pid, name: model.name) }
+                    Button("Quit") {
+                        if let identity = model.identity { monitor.quit(identity: identity, name: model.name) }
+                    }
                         .buttonStyle(FlatButtonStyle())
                         .help("Quit normally; apps can save their data first (⌘⌫)")
                     Button(model.isConfirmingForceQuit ? "Confirm Force Quit" : "Force Quit") {
-                        monitor.forceQuit(pid: model.pid, name: model.name)
+                        if let identity = model.identity { monitor.forceQuit(identity: identity, name: model.name) }
                     }
                     .buttonStyle(FlatButtonStyle(tint: Palette.critical, prominent: model.isConfirmingForceQuit))
-                    .help("End the process immediately; unsaved data is lost (⌥⌘⌫, press twice)")
+                    .disabled(!ProcessIdentity.supportsSignals)
+                    .help(ProcessIdentity.supportsSignals
+                          ? "End the process immediately; unsaved data is lost (⌥⌘⌫, press twice)"
+                          : "Safe process signals require macOS 15 or later")
                 }
             }
         }

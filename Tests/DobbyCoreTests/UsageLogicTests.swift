@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import DobbyCore
 
-private func snap(_ pid: pid_t, _ name: String, cpu: UInt64, mem: UInt64 = 0, path: String? = nil, uid: uid_t = 501) -> ProcessSnapshot {
-    ProcessSnapshot(pid: pid, name: name, path: path, uid: uid, cpuTimeNanos: cpu, memoryBytes: mem)
+private func snap(_ pid: pid_t, _ name: String, cpu: UInt64, mem: UInt64 = 0, path: String? = nil, uid: uid_t = 501, startTime: UInt64 = 1) -> ProcessSnapshot {
+    ProcessSnapshot(pid: pid, startTime: startTime, name: name, path: path, uid: uid, cpuTimeNanos: cpu, memoryBytes: mem)
 }
 
-func usage(_ pid: pid_t, _ name: String, cpu: Double = 0, mem: UInt64 = 0, path: String? = nil, uid: uid_t = 501, owner: String? = nil) -> ProcessUsage {
-    var usage = ProcessUsage(pid: pid, name: name, path: path, uid: uid, cpuPercent: cpu, memoryBytes: mem)
+func usage(_ pid: pid_t, _ name: String, cpu: Double = 0, mem: UInt64 = 0, path: String? = nil, uid: uid_t = 501, owner: String? = nil, startTime: UInt64 = 1) -> ProcessUsage {
+    var usage = ProcessUsage(pid: pid, startTime: startTime, name: name, path: path, uid: uid, cpuPercent: cpu, memoryBytes: mem)
     usage.ownerName = owner
     return usage
 }
@@ -41,6 +41,20 @@ func usage(_ pid: pid_t, _ name: String, cpu: Double = 0, mem: UInt64 = 0, path:
         #expect(restarted.first?.cpuPercent == 0)
     }
 
+    @Test func sameNamedReusedPIDDoesNotInheritCPU() throws {
+        func decoded(startTime: UInt64, cpu: UInt64) throws -> ProcessSnapshot {
+            let json = """
+            {"pid": 5, "name": "worker", "path": "/bin/worker", "uid": 501,
+             "startTime": \(startTime), "cpuTimeNanos": \(cpu), "memoryBytes": 42}
+            """
+            return try JSONDecoder().decode(ProcessSnapshot.self, from: Data(json.utf8))
+        }
+        let old = try decoded(startTime: 100, cpu: 1_000_000_000)
+        let replacement = try decoded(startTime: 200, cpu: 5_000_000_000)
+        let result = UsageCalculator.usages(previous: [old], current: [replacement], elapsedNanos: 1_000_000_000)
+        #expect(result.first?.cpuPercent == 0)
+    }
+
     @Test func zeroElapsedTimeYieldsZeroCPU() {
         let result = UsageCalculator.usages(previous: [snap(1, "a", cpu: 0)], current: [snap(1, "a", cpu: 10)], elapsedNanos: 0)
         #expect(result.first?.cpuPercent == 0)
@@ -55,6 +69,14 @@ func usage(_ pid: pid_t, _ name: String, cpu: Double = 0, mem: UInt64 = 0, path:
         usage(13, "Google Chrome Helper", cpu: 1, mem: 50,
               path: "/Applications/Google Chrome.app/Contents/Frameworks/X.framework/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper"),
     ]
+
+    @Test func reusedPIDDoesNotInheritFrozenPosition() {
+        let old = usage(10, "worker", startTime: 100)
+        let survivor = usage(11, "other", startTime: 100)
+        let replacement = usage(10, "worker", startTime: 200)
+        let result = ProcessRanking.applyingFrozenOrder([replacement, survivor], previousOrder: [old.identity, survivor.identity])
+        #expect(result.map(\.identity) == [survivor.identity, replacement.identity])
+    }
 
     @Test func sortsByCPUDescendingWithNameAsTieBreaker() {
         let ranked = ProcessRanking.ranked(items, by: .cpu, query: "")
@@ -81,7 +103,7 @@ func usage(_ pid: pid_t, _ name: String, cpu: Double = 0, mem: UInt64 = 0, path:
     @Test func frozenOrderKeepsExistingRowsInPlaceAndAppendsNewOnes() {
         let fresh = [usage(3, "c", cpu: 90), usage(4, "d", cpu: 50), usage(1, "a", cpu: 10)]
         // pid 2 vanished, pid 4 is new; 1 and 3 keep their previous relative order.
-        let frozen = ProcessRanking.applyingFrozenOrder(fresh, previousOrder: [1, 2, 3])
+        let frozen = ProcessRanking.applyingFrozenOrder(fresh, previousOrder: [1, 2, 3].map { ProcessIdentity(pid: $0, startTime: 1) })
         #expect(frozen.map(\.pid) == [1, 3, 4])
         #expect(frozen.first?.cpuPercent == 10)
     }

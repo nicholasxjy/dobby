@@ -196,7 +196,7 @@ struct SettingsView: View {
         switch monitor.systemAccess {
         case .on: "Running"
         case .requesting: "Starting…"
-        case .off: "Off"
+        case .off, .explaining: "Off"
         }
     }
 

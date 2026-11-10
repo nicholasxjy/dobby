@@ -22,7 +22,7 @@ enum SnapshotRenderer {
         case "memory": monitor.tab = .memory
         case "ports": monitor.tab = .ports
         case "network": monitor.tab = .network
-        case "all-users": monitor.isExplainingSystemAccess = true
+        case "all-users": monitor.requestAllUsers()
         case "settings":
             monitor.showsMenuBarStats = true
             monitor.isShowingSettings = true
@@ -53,7 +53,7 @@ enum SnapshotRenderer {
                 if monitor.tab == .ports, monitor.portRows.indices.contains(index) {
                     monitor.portSelection = monitor.portRows[index].id
                 } else if monitor.tab != .ports, monitor.rows.indices.contains(index) {
-                    monitor.selection = monitor.rows[index].pid
+                    monitor.selection = monitor.rows[index].identity
                 }
             }
             try? await Task.sleep(for: .milliseconds(400))

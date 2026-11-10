@@ -18,7 +18,11 @@ final class ProcessMonitor {
 
     /// Whether the root helper is supplying every user's processes.
     enum SystemAccess: Equatable {
-        case off, requesting, on
+        case off, explaining, requesting, on
+    }
+
+    enum NetworkState: Equatable {
+        case idle, loading, ready, failed(String)
     }
 
     var tab: Tab = .cpu {
@@ -40,19 +44,21 @@ final class ProcessMonitor {
     var isShowingSettings = false {
         didSet {
             guard isShowingSettings != oldValue else { return }
+            invalidateProcessSample()
             updateNetworkSampling()
             if isShowingSettings {
+                confirmingForceQuit = nil
                 hoveredRowID = nil
-                isExplainingSystemAccess = false
+                dismissSystemAccessExplanation()
                 isPointerInList = false
-            } else if refreshTask != nil {
+            } else if shouldSampleProcesses {
                 // Process sampling pauses behind the settings view; catch up right away.
-                sample(publish: true)
+                Task { await sample(publish: true) }
             }
         }
     }
     /// "All users" was chosen; the explanation shows before the password prompt.
-    var isExplainingSystemAccess = false
+    var isExplainingSystemAccess: Bool { systemAccess == .explaining }
     var metric: Metric {
         switch tab {
         case .cpu, .ports: .cpu
@@ -73,7 +79,7 @@ final class ProcessMonitor {
     }
     /// Row under the pointer: a PID on process tabs, a `PortBinding.ID` on the ports tab.
     var hoveredRowID: AnyHashable?
-    var selection: pid_t? {
+    var selection: ProcessIdentity? {
         didSet { if selection != oldValue { confirmingForceQuit = nil } }
     }
     var portSelection: PortBinding.ID? {
@@ -90,8 +96,11 @@ final class ProcessMonitor {
     private(set) var hasSampled = false
     private(set) var network: NetworkRate?
     private(set) var networkHistory: [NetworkRate] = []
-    private(set) var hasSampledNetwork = false
-    private(set) var networkError: String?
+    private(set) var networkState: NetworkState = .idle
+    var hasSampledNetwork: Bool { networkState == .ready }
+    var networkError: String? {
+        if case .failed(let message) = networkState { message } else { nil }
+    }
     /// Latest whole-system CPU split, plus history for the graphs (oldest first).
     private(set) var cpuLoad: CPULoad?
     private(set) var cpuHistory: [CPULoad] = []
@@ -99,7 +108,12 @@ final class ProcessMonitor {
     private(set) var memoryHistory: [Double] = []
     var systemCPU: Double? { cpuLoad?.total }
     private(set) var notice: Notice?
-    private(set) var confirmingForceQuit: pid_t?
+    private(set) var confirmingForceQuit: ProcessIdentity? {
+        didSet {
+            forceQuitTask?.cancel()
+            forceQuitTask = nil
+        }
+    }
     private(set) var systemAccess: SystemAccess = .off
     /// Processes Dobby refuses to end (launchd, WindowServer, ...).
     private(set) var protectedPIDs: Set<pid_t> = []
@@ -119,8 +133,11 @@ final class ProcessMonitor {
         }
     }
 
-    @ObservationIgnored private let sampler = ProcessSampler()
-    @ObservationIgnored private let portScanner = PortScanner()
+    @ObservationIgnored private let sampleProcesses: () -> [ProcessSnapshot]
+    @ObservationIgnored private let scanSockets: () -> [SocketEntry]
+    @ObservationIgnored private var processSampleID: UUID?
+    @ObservationIgnored private var samplingGeneration = UUID()
+    @ObservationIgnored private var backgroundPortTask: Task<Void, Never>?
     @ObservationIgnored private var helper: HelperClient?
     @ObservationIgnored private var userNames: [uid_t: String] = [:]
     @ObservationIgnored private var usages: [ProcessUsage] = []
@@ -137,7 +154,11 @@ final class ProcessMonitor {
     @ObservationIgnored private var latestNetwork: NetworkRate?
     @ObservationIgnored private var networkSamples = RingHistory<NetworkRate>(capacity: 90)
     @ObservationIgnored private var networkTask: Task<Void, Never>?
-    @ObservationIgnored private var networkRates: [pid_t: NetworkRate] = [:]
+    @ObservationIgnored private var systemAccessTask: Task<Void, Never>?
+    @ObservationIgnored private var forceQuitTask: Task<Void, Never>?
+    @ObservationIgnored private let sampleNetwork: (Int) async throws -> [pid_t: NetworkRate]
+    @ObservationIgnored private let connectHelper: () async throws -> HelperClient?
+    @ObservationIgnored private var networkRates: [ProcessIdentity: NetworkRate] = [:]
     @ObservationIgnored private var iconCache: [String: NSImage] = [:]
     /// Same count as the Ports tab total; scanned in the background only for the menu bar readout.
     @ObservationIgnored private var portCount: Int?
@@ -153,6 +174,7 @@ final class ProcessMonitor {
     }
 
     private var interval: Duration { .seconds(preferences.refreshInterval.seconds) }
+    private var shouldSampleProcesses: Bool { isVisible && !isShowingSettings }
 
     /// How much time the history graphs cover.
     var historySpan: String {
@@ -161,23 +183,33 @@ final class ProcessMonitor {
     }
 
     /// The process the quit shortcuts and the action bar act on, from whichever tab is showing.
-    var selectedTarget: (pid: pid_t, name: String, icon: NSImage)? {
+    var selectedTarget: (identity: ProcessIdentity, name: String, icon: NSImage)? {
         if tab == .ports {
-            return portRows.first { $0.id == portSelection }.map { ($0.pid, $0.name, icon(forAppBundle: $0.appBundlePath)) }
+            guard let row = portRows.first(where: { $0.id == portSelection }), let identity = row.identity else { return nil }
+            return (identity, row.name, icon(forAppBundle: row.appBundlePath))
         }
-        return rows.first { $0.pid == selection }.map { ($0.pid, $0.name, icon(forAppBundle: $0.appBundlePath)) }
+        return rows.first { $0.identity == selection }.map { ($0.identity, $0.name, icon(forAppBundle: $0.appBundlePath)) }
     }
 
     // MARK: Sampling
 
-    init() {
+    init(
+        sampleProcesses: @escaping () -> [ProcessSnapshot] = ProcessSampler().snapshot,
+        scanSockets: @escaping () -> [SocketEntry] = PortScanner().scan,
+        sampleNetwork: @escaping (Int) async throws -> [pid_t: NetworkRate] = { try await NetworkProcessSampler.sample(seconds: $0) },
+        connectHelper: @escaping () async throws -> HelperClient? = ProcessMonitor.connectSystemHelper
+    ) {
+        self.sampleProcesses = sampleProcesses
+        self.scanSockets = scanSockets
+        self.sampleNetwork = sampleNetwork
+        self.connectHelper = connectHelper
         // System totals use cheap host and interface counters, sampled all the time,
         // so the graphs already have history when the panel opens. Process sampling stays panel-only.
         Task { [weak self] in
             while !Task.isCancelled {
-                guard let self else { return }
-                self.sampleSystem()
-                try? await Task.sleep(for: self.interval)
+                guard let interval = self?.interval else { return }
+                self?.sampleSystem()
+                try? await Task.sleep(for: interval)
             }
         }
     }
@@ -209,9 +241,8 @@ final class ProcessMonitor {
 
     private func refreshMenuBarSummary() {
         // While the panel is open, process sampling keeps the count current.
-        if !isVisible, countsPortsInBackground, let bindings = scanPorts() {
-            portCount = bindings.count
-            if flagsNewNetworkPorts { newNetworkPorts.update(with: bindings) }
+        if !shouldSampleProcesses, countsPortsInBackground, backgroundPortTask == nil {
+            updateBackgroundPorts()
         }
         let summary = MenuBarSummary(
             cpu: cpuSamples.values.last?.total,
@@ -237,17 +268,42 @@ final class ProcessMonitor {
         if showsMenuBarStats { refreshMenuBarSummary() }
     }
 
-    /// A few milliseconds of libproc calls. With the root helper on, covers every user's ports like the Ports tab.
-    private func scanPorts() -> [PortBinding]? {
-        let sockets: [SocketEntry]
-        if let helper {
-            // A failing helper is reported and turned off by the next panel sample; keep the last count until then.
-            guard let snapshot = try? helper.snapshot() else { return nil }
-            sockets = snapshot.sockets
-        } else {
-            sockets = portScanner.scan()
+    private func invalidateProcessSample() {
+        samplingGeneration = UUID()
+        processSampleID = nil
+    }
+
+    private func helperDisconnected() {
+        disableSystemAccess(resample: false)
+        show("System process helper disconnected; showing only your processes", isError: true)
+    }
+
+    private func updateBackgroundPorts() {
+        let client = helper
+        let generation = samplingGeneration
+        backgroundPortTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.backgroundPortTask = nil }
+            let sockets: [SocketEntry]
+            do {
+                if let client {
+                    sockets = try await client.snapshot().sockets
+                } else {
+                    sockets = self.scanSockets()
+                }
+                guard !Task.isCancelled, generation == self.samplingGeneration, self.helper === client,
+                      !self.shouldSampleProcesses, self.countsPortsInBackground else { return }
+            } catch {
+                guard !Task.isCancelled, generation == self.samplingGeneration, self.helper === client,
+                      !self.shouldSampleProcesses, self.countsPortsInBackground else { return }
+                self.helperDisconnected()
+                sockets = self.scanSockets()
+            }
+            let bindings = PortList.bindings(from: sockets, processes: [:])
+            self.portCount = bindings.count
+            if self.flagsNewNetworkPorts { self.newNetworkPorts.update(with: bindings) }
+            self.refreshMenuBarSummary()
         }
-        return PortList.bindings(from: sockets, processes: [:])
     }
 
     private func publishSystem() {
@@ -269,11 +325,14 @@ final class ProcessMonitor {
         updateNetworkSampling()
         publishSystem()
         refreshTask = Task { [weak self] in
+            guard !Task.isCancelled else { return }
             // A fresh baseline first, so CPU reflects "now" rather than the time since the panel was last open.
-            self?.sample(publish: self?.usages.isEmpty ?? true)
+            if self?.shouldSampleProcesses == true {
+                await self?.sample(publish: self?.usages.isEmpty ?? true)
+            }
             try? await Task.sleep(for: .milliseconds(400))
             while !Task.isCancelled {
-                if self?.isShowingSettings == false { self?.sample(publish: true) }
+                if self?.shouldSampleProcesses == true { await self?.sample(publish: true) }
                 try? await Task.sleep(for: self?.interval ?? .seconds(2))
             }
         }
@@ -285,27 +344,35 @@ final class ProcessMonitor {
         isVisible = false
         updateNetworkSampling()
         lastSampleTime = 0
+        invalidateProcessSample()
+        confirmingForceQuit = nil
         isPointerInList = false
         hoveredRowID = nil
     }
 
-    private func sample(publish: Bool) {
-        let now = DispatchTime.now().uptimeNanoseconds
+    func sample(publish: Bool) async {
+        guard shouldSampleProcesses, processSampleID == nil else { return }
+        let sampleID = UUID()
+        processSampleID = sampleID
+        defer { if processSampleID == sampleID { processSampleID = nil } }
+        let generation = samplingGeneration
         var snapshots: [ProcessSnapshot]
         var helperSockets: [SocketEntry]?
         if let helper {
             do {
-                let snapshot = try helper.snapshot()
+                let snapshot = try await helper.snapshot()
+                guard !Task.isCancelled, generation == samplingGeneration, self.helper === helper, shouldSampleProcesses else { return }
                 snapshots = snapshot.processes
                 helperSockets = snapshot.sockets
             } catch {
-                disableSystemAccess(resample: false)
-                show("System process helper disconnected; showing only your processes", isError: true)
-                snapshots = sampler.snapshot()
+                guard !Task.isCancelled, generation == samplingGeneration, self.helper === helper, shouldSampleProcesses else { return }
+                helperDisconnected()
+                snapshots = sampleProcesses()
             }
         } else {
-            snapshots = sampler.snapshot()
+            snapshots = sampleProcesses()
         }
+        let now = DispatchTime.now().uptimeNanoseconds
         let elapsed = lastSampleTime == 0 ? 0 : now - lastSampleTime
         var fresh = UsageCalculator.usages(previous: lastSnapshots, current: snapshots, elapsedNanos: elapsed)
         lastSnapshots = snapshots
@@ -320,7 +387,7 @@ final class ProcessMonitor {
         for index in fresh.indices {
             if let name = appNames[fresh[index].pid] { fresh[index].name = name }
             fresh[index].ownerName = userName(fresh[index].uid)
-            fresh[index].network = networkRates[fresh[index].pid]
+            fresh[index].network = networkRates[fresh[index].identity]
         }
 
         usages = fresh
@@ -328,7 +395,7 @@ final class ProcessMonitor {
         rebuildRows(keepOrder: isPointerInList)
 
         let processes = Dictionary(fresh.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
-        allPorts = PortList.bindings(from: helperSockets ?? portScanner.scan(), processes: processes)
+        allPorts = PortList.bindings(from: helperSockets ?? scanSockets(), processes: processes)
         portCount = allPorts.count
         if flagsNewNetworkPorts {
             newNetworkPorts.update(with: allPorts)
@@ -364,44 +431,53 @@ final class ProcessMonitor {
         let items = tab == .network ? usages.filter { $0.network != nil } : usages
         var ranked = ProcessRanking.ranked(items, by: metric, query: query)
         if keepOrder {
-            ranked = ProcessRanking.applyingFrozenOrder(ranked, previousOrder: rows.map(\.pid))
+            ranked = ProcessRanking.applyingFrozenOrder(ranked, previousOrder: rows.map(\.identity))
         }
         rows = ranked
         barScale = ProcessRanking.barScale(for: ranked, metric: metric)
         processCount = items.count
-        if let selection, !ranked.contains(where: { $0.pid == selection }) {
+        if let selection, !ranked.contains(where: { $0.identity == selection }) {
             self.selection = nil
         }
     }
 
     // MARK: Network traffic
 
-    func updateNetworkSampling() {
-        guard isVisible, tab == .network, !isShowingSettings else {
+    @discardableResult
+    func updateNetworkSampling() -> Task<Void, Never>? {
+        guard shouldSampleProcesses, tab == .network else {
             networkTask?.cancel()
             networkTask = nil
-            return
+            networkState = .idle
+            return nil
         }
-        guard networkTask == nil else { return }
+        if let networkTask { return networkTask }
         networkRates = [:]
-        hasSampledNetwork = false
-        networkError = nil
+        networkState = .loading
         for index in usages.indices { usages[index].network = nil }
         rebuildRows(keepOrder: false)
         networkTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 do {
-                    let rates = try await NetworkProcessSampler.sample(seconds: self.preferences.refreshInterval.seconds)
+                    let baseline = self.usages.isEmpty
+                        ? self.sampleProcesses().map { ($0.pid, $0.identity) }
+                        : self.usages.map { ($0.pid, $0.identity) }
+                    let identities = Dictionary(baseline, uniquingKeysWith: { _, last in last })
+                    let rates = try await self.sampleNetwork(self.preferences.refreshInterval.seconds)
                     try Task.checkCancellation()
-                    self.networkRates = rates
-                    self.hasSampledNetwork = true
-                    for index in self.usages.indices { self.usages[index].network = rates[self.usages[index].pid] }
+                    self.networkRates = Dictionary(rates.compactMap { pid, rate in
+                        guard let identity = identities[pid], (try? ProcessIdentity.current(pid: pid)) == identity else { return nil }
+                        return (identity, rate)
+                    }, uniquingKeysWith: { _, last in last })
+                    self.networkState = .ready
+                    for index in self.usages.indices { self.usages[index].network = self.networkRates[self.usages[index].identity] }
                     self.rebuildRows(keepOrder: self.isPointerInList)
                 } catch is CancellationError {
                     return
                 } catch {
-                    self.networkError = "Couldn't read process traffic. Try again."
+                    guard !Task.isCancelled else { return }
+                    self.networkState = .failed("Couldn't read process traffic. Try again.")
                     self.networkRates = [:]
                     for index in self.usages.indices { self.usages[index].network = nil }
                     self.rebuildRows(keepOrder: false)
@@ -410,6 +486,7 @@ final class ProcessMonitor {
                 }
             }
         }
+        return networkTask
     }
 
     // MARK: Selection
@@ -418,7 +495,7 @@ final class ProcessMonitor {
         if tab == .ports {
             portSelection = Self.moved(portSelection, by: offset, in: portRows.map(\.id))
         } else {
-            selection = Self.moved(selection, by: offset, in: rows.map(\.pid))
+            selection = Self.moved(selection, by: offset, in: rows.map(\.identity))
         }
     }
 
@@ -430,8 +507,8 @@ final class ProcessMonitor {
         return ids[min(max(index + offset, 0), ids.count - 1)]
     }
 
-    func toggleSelection(_ pid: pid_t) {
-        selection = selection == pid ? nil : pid
+    func toggleSelection(_ identity: ProcessIdentity) {
+        selection = selection == identity ? nil : identity
     }
 
     func togglePortSelection(_ id: PortBinding.ID) {
@@ -448,16 +525,18 @@ final class ProcessMonitor {
 
     var hasSelection: Bool { selectedTarget != nil }
 
-    /// What Esc undoes first: the settings view, the All users explanation, the selection, then the search.
+    /// Esc backs out of settings, the explanation, force-quit confirmation, selection, then search.
     var canCancel: Bool {
-        isShowingSettings || isExplainingSystemAccess || hasSelection || !query.isEmpty
+        isShowingSettings || isExplainingSystemAccess || confirmingForceQuit != nil || hasSelection || !query.isEmpty
     }
 
     func cancel() {
         if isShowingSettings {
             isShowingSettings = false
         } else if isExplainingSystemAccess {
-            isExplainingSystemAccess = false
+            dismissSystemAccessExplanation()
+        } else if confirmingForceQuit != nil {
+            confirmingForceQuit = nil
         } else if selection != nil || portSelection != nil {
             selection = nil
             portSelection = nil
@@ -473,38 +552,48 @@ final class ProcessMonitor {
 
     // MARK: Termination
 
-    func quit(pid: pid_t, name: String) {
-        perform(.quit, pid: pid, name: name)
+    @discardableResult
+    func quit(identity: ProcessIdentity, name: String) -> Task<Void, Never> {
+        perform(.quit, identity: identity, name: name)
     }
 
-    /// First call arms the button; a second call within a few seconds force quits.
-    func forceQuit(pid: pid_t, name: String, confirmed: Bool = false) {
-        guard confirmed || confirmingForceQuit == pid else {
-            confirmingForceQuit = pid
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(3))
-                if self?.confirmingForceQuit == pid { self?.confirmingForceQuit = nil }
+    /// First call arms the captured process generation; a second call force quits that same generation.
+    @discardableResult
+    func forceQuit(identity: ProcessIdentity, name: String, confirmed: Bool = false) -> Task<Void, Never>? {
+        guard confirmed || confirmingForceQuit == identity else {
+            confirmingForceQuit = identity
+            forceQuitTask = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                guard !Task.isCancelled else { return }
+                self?.confirmingForceQuit = nil
             }
-            return
+            return nil
         }
-        perform(.forceQuit, pid: pid, name: name)
+        return perform(.forceQuit, identity: identity, name: name)
     }
 
-    private func perform(_ mode: TerminationMode, pid: pid_t, name: String) {
+    private func perform(_ mode: TerminationMode, identity: ProcessIdentity, name: String) -> Task<Void, Never> {
         confirmingForceQuit = nil
-        guard !protectedPIDs.contains(pid), pid > 1 else {
-            show("“\(name)” is a critical system process; ending it would freeze or log out the Mac", isError: true)
-            return
-        }
-        do {
-            try terminator.terminate(pid, mode: mode)
-            show(mode == .quit ? "Asked “\(name)” to quit" : "Force quit “\(name)”", isError: false)
-        } catch {
-            show(message(for: error, name: name), isError: true)
-        }
-        Task { [weak self] in
+        let client = helper
+        return Task {
+            do {
+                guard !protectedPIDs.contains(identity.pid), identity.pid > 1 else { throw TerminationError.protectedProcess }
+                do {
+                    try terminator.terminate(identity, mode: mode)
+                } catch TerminationError.notPermitted {
+                    guard let client else { throw TerminationError.notPermitted }
+                    let code = await client.signal(identity, mode == .quit ? SIGTERM : SIGKILL)
+                    if code == ECONNRESET, helper === client { disableSystemAccess(resample: false) }
+                    try ProcessTerminator.checkSignalResult(code)
+                }
+                show(mode == .quit ? "Asked “\(name)” to quit" : "Force quit “\(name)”", isError: false)
+            } catch let error as TerminationError {
+                show(message(for: error, name: name), isError: true)
+            } catch {
+                show("Couldn't end “\(name)”", isError: true)
+            }
             try? await Task.sleep(for: .milliseconds(600))
-            self?.sample(publish: true)
+            if shouldSampleProcesses { await sample(publish: true) }
         }
     }
 
@@ -514,7 +603,10 @@ final class ProcessMonitor {
         case .notPermitted:
             return systemAccess == .on ? "No permission to end “\(name)”" : "No permission to end “\(name)”; switch to All users and try again"
         case .noSuchProcess: return "“\(name)” has already exited"
-        case .failed(let code): return "Couldn't end “\(name)” (\(String(cString: strerror(code))))"
+        case .failed(let code):
+            if code == ENOTSUP { return "Safe process signals require macOS 15 or later. Apps can still quit normally." }
+            if code == ECONNRESET { return "Lost the helper connection while ending “\(name)”. Check the list before trying again." }
+            return "Couldn't end “\(name)” (\(String(cString: strerror(code))))"
         }
     }
 
@@ -528,76 +620,103 @@ final class ProcessMonitor {
     }
 
     private var terminator: ProcessTerminator {
-        let helper = self.helper
-        return ProcessTerminator(
-            // Signal directly when allowed; otherwise relay through the root helper if it's running.
-            sendSignal: { pid, signal in
-                let code = kill(pid, signal) == 0 ? 0 : errno
-                guard code == EPERM, let helper else { return code }
-                return helper.signal(pid, signal)
-            },
-            requestAppQuit: { pid in
-                MainActor.assumeIsolated {
-                    guard let app = NSRunningApplication(processIdentifier: pid), app.bundleURL != nil else { return false }
-                    return app.terminate()
-                }
+        ProcessTerminator(requestAppQuit: { identity in
+            MainActor.assumeIsolated {
+                guard let app = NSRunningApplication(processIdentifier: identity.pid), app.bundleURL != nil,
+                      (try? identity.validate()) != nil else { return false }
+                return app.terminate()
             }
-        )
+        })
     }
 
     // MARK: System access
 
     /// "All users": explain first; the password prompt comes from `confirmAllUsers()`.
     func requestAllUsers() {
-        if systemAccess == .off { isExplainingSystemAccess = true }
+        if systemAccess == .off { systemAccess = .explaining }
     }
 
-    func confirmAllUsers() {
-        isExplainingSystemAccess = false
-        guard systemAccess == .off else { return }
-        Task { await enableSystemAccess() }
+    func dismissSystemAccessExplanation() {
+        if systemAccess == .explaining { systemAccess = .off }
     }
 
-    /// "Mine": stops the root helper if it's running.
+    @discardableResult
+    func confirmAllUsers() -> Task<Void, Never>? {
+        guard systemAccess == .explaining else { return nil }
+        systemAccess = .requesting
+        let task = Task { await enableSystemAccess() }
+        systemAccessTask = task
+        return task
+    }
+
+    /// "Mine": cancels startup or stops the running root helper.
     func showMineOnly() {
-        isExplainingSystemAccess = false
-        if systemAccess == .on { disableSystemAccess() }
+        systemAccessTask?.cancel()
+        systemAccessTask = nil
+        if systemAccess == .on {
+            disableSystemAccess()
+        } else {
+            systemAccess = .off
+        }
     }
 
     private func enableSystemAccess() async {
-        systemAccess = .requesting
-        let helperURL = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("DobbyHelper")
-        guard let helperURL, FileManager.default.isExecutableFile(atPath: helperURL.path) else {
-            systemAccess = .off
-            show("DobbyHelper not found; rebuild the app with scripts/build-app.sh", isError: true)
-            return
-        }
+        guard !Task.isCancelled else { return }
         do {
-            let client = try HelperClient()
-            let script = HelperLaunchScript.make(helperPath: helperURL.path, socketPath: client.socketPath, clientPID: getpid())
-            let result = await Self.runAppleScript(script)
-            guard result.status == 0 else {
-                systemAccess = .off
-                // -128: the user cancelled the password prompt.
-                if !result.error.contains("-128") { show("Couldn't get administrator privileges", isError: true) }
+            let client = try await connectHelper()
+            guard !Task.isCancelled else {
+                client?.close()
                 return
             }
-            try await Task.detached { try client.acceptHelper(timeout: 10) }.value
+            systemAccessTask = nil
+            guard let client else {
+                systemAccess = .off
+                return
+            }
             helper = client
+            invalidateProcessSample()
             systemAccess = .on
             show("Showing processes of all users", isError: false)
-            sample(publish: true)
+            if shouldSampleProcesses { await sample(publish: true) }
         } catch {
+            guard !Task.isCancelled else { return }
+            systemAccessTask = nil
             systemAccess = .off
-            show("System process helper failed to start", isError: true)
+            let message = switch error {
+            case SystemAccessError.helperMissing: "DobbyHelper not found; rebuild the app with scripts/build-app.sh"
+            case SystemAccessError.authorizationFailed: "Couldn't get administrator privileges"
+            default: "System process helper failed to start"
+            }
+            show(message, isError: true)
         }
+    }
+
+    private enum SystemAccessError: Error { case helperMissing, authorizationFailed }
+
+    private static func connectSystemHelper() async throws -> HelperClient? {
+        let helperURL = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("DobbyHelper")
+        guard let helperURL, FileManager.default.isExecutableFile(atPath: helperURL.path) else {
+            throw SystemAccessError.helperMissing
+        }
+        let client = try HelperClient()
+        let script = HelperLaunchScript.make(helperPath: helperURL.path, socketPath: client.socketPath, clientIdentity: try ProcessIdentity.current(pid: getpid()))
+        let result = await runAppleScript(script)
+        try Task.checkCancellation()
+        guard result.status == 0 else {
+            // -128: the user cancelled the password prompt.
+            if result.error.contains("-128") { return nil }
+            throw SystemAccessError.authorizationFailed
+        }
+        try await Task.detached { try client.acceptHelper(timeout: 10) }.value
+        return client
     }
 
     private func disableSystemAccess(resample: Bool = true) {
         helper?.close() // the helper exits when the connection closes
         helper = nil
+        invalidateProcessSample()
         systemAccess = .off
-        if resample, refreshTask != nil { sample(publish: true) }
+        if resample, shouldSampleProcesses { Task { await sample(publish: true) } }
     }
 
     private nonisolated static func runAppleScript(_ source: String) async -> (status: Int32, error: String) {

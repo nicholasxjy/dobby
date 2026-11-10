@@ -16,10 +16,10 @@ public enum ProcessRanking {
 
     /// Keeps rows in their previous on-screen order so they don't jump under the pointer.
     /// Rows that disappeared are dropped; new rows are appended in the given order.
-    public static func applyingFrozenOrder(_ items: [ProcessUsage], previousOrder: [pid_t]) -> [ProcessUsage] {
+    public static func applyingFrozenOrder(_ items: [ProcessUsage], previousOrder: [ProcessIdentity]) -> [ProcessUsage] {
         let position = Dictionary(previousOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
-        let known = items.filter { position[$0.pid] != nil }.sorted { position[$0.pid]! < position[$1.pid]! }
-        let fresh = items.filter { position[$0.pid] == nil }
+        let known = items.filter { position[$0.identity] != nil }.sorted { position[$0.identity]! < position[$1.identity]! }
+        let fresh = items.filter { position[$0.identity] == nil }
         return known + fresh
     }
 

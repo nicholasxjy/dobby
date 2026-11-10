@@ -15,31 +15,36 @@ public enum TerminationError: Error, Equatable {
 }
 
 public struct ProcessTerminator {
-    /// Returns 0 on success or an errno value.
-    private let sendSignal: (pid_t, Int32) -> Int32
-    /// Returns true when the PID belongs to an app that accepted a graceful quit request.
-    private let requestAppQuit: (pid_t) -> Bool
+    private let sendSignal: (ProcessIdentity, Int32) -> Int32
+    private let requestAppQuit: (ProcessIdentity) -> Bool
+    private let validate: (ProcessIdentity) throws(TerminationError) -> Void
     private let ownPID: pid_t
 
     public init(
-        sendSignal: @escaping (pid_t, Int32) -> Int32 = { kill($0, $1) == 0 ? 0 : errno },
-        requestAppQuit: @escaping (pid_t) -> Bool = { _ in false },
+        sendSignal: @escaping (ProcessIdentity, Int32) -> Int32 = { $0.send($1) },
+        requestAppQuit: @escaping (ProcessIdentity) -> Bool = { _ in false },
+        validate: @escaping (ProcessIdentity) throws(TerminationError) -> Void = { try $0.validate() },
         ownPID: pid_t = getpid()
     ) {
         self.sendSignal = sendSignal
         self.requestAppQuit = requestAppQuit
+        self.validate = validate
         self.ownPID = ownPID
     }
 
-    public func terminate(_ pid: pid_t, mode: TerminationMode) throws(TerminationError) {
-        guard pid > 1, pid != ownPID else { throw .protectedProcess }
-        if mode == .quit, requestAppQuit(pid) { return }
+    public func terminate(_ identity: ProcessIdentity, mode: TerminationMode) throws(TerminationError) {
+        guard identity.pid > 1, identity.pid != ownPID else { throw .protectedProcess }
+        try validate(identity)
+        if mode == .quit, requestAppQuit(identity) { return }
+        try Self.checkSignalResult(sendSignal(identity, mode == .quit ? SIGTERM : SIGKILL))
+    }
 
-        switch sendSignal(pid, mode == .quit ? SIGTERM : SIGKILL) {
+    public static func checkSignalResult(_ code: Int32) throws(TerminationError) {
+        switch code {
         case 0: return
-        case EPERM: throw .notPermitted
+        case EPERM, EACCES: throw .notPermitted
         case ESRCH: throw .noSuchProcess
-        case let code: throw .failed(errno: code)
+        default: throw .failed(errno: code)
         }
     }
 }

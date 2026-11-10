@@ -10,5 +10,6 @@ let package = Package(
         .executableTarget(name: "DobbyHelper", dependencies: ["DobbyCore"]),
         // The live helper tests launch the DobbyHelper binary that `swift test` builds alongside.
         .testTarget(name: "DobbyCoreTests", dependencies: ["DobbyCore"]),
+        .testTarget(name: "DobbyTests", dependencies: ["Dobby"]),
     ]
 )
